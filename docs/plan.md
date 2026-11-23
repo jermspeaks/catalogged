@@ -34,9 +34,9 @@ Ordered by value for the owner's actual goal (a complete, good-looking catalogue
 
 ### P1. Import the rest of the log (M)
 The 2010 sheet is in; 2011 to 2026 are not. The owner's log lives in `~/projects/jermspeaks.github.io/src/content/log/` (one markdown file per year, with books, movies, some games and shows; later years carry TMDB links and Letterboxd links).
-- Move the log-to-CSV generator into the repo (it is a throwaway script in `/tmp` today) and extend it to every year's formats (links, `🔁` rewatch marks, `🎮`/`📺` lines with year ranges, season numbers). Output an `author` column for books (`creator` is accepted too).
+- Generator: `scripts/log2csv.py <log.md> <year> <out.csv>` (in the repo; sheets go to `seeds/`, which is gitignored because they are personal data). It reads the 2010 and 2011 formats and understands TMDB links, Letterboxd links, `🔁`, `🎮` and `📺` lines; later years (2013 onwards) have not been run through it yet, so check each year's output before matching. Books get a `creator` column from the `by Author` text.
 - Per year: generate, `match --interactive` (sure matches are filled in without asking), `import --dry-run`, 10 rows for real, then the rest with `--skip-existing`; `scripts/backup.sh` first. Mind the D1 write budget: 5,000 entries is about half of one day's writes; import a year or two per run.
-- Starting with 2011.
+- Status: 2010 imported. 2011 generated (124 rows: 86 movies, 38 books) and matched: 66 sure, 48 to check, 10 with no match. Next: `match -i`, then import, after the creator migration and Worker deploy. Then 2012 and on.
 
 ### P2. Identify (M)
 New idea from the owner (2026-11-23): replace the cover finder with an **identify** action that grabs all metadata from the provider and the cover, including the title.
