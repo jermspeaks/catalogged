@@ -63,10 +63,10 @@ cargo run -p catalogged-cli -- add --kind movie --title "Some Film" --status con
 cargo run -p catalogged-cli -- edit --kind movie --slug some-film --rating 9 --review "Better on rewatch"          # only passed flags change
 cargo run -p catalogged-cli -- delete --kind movie --slug some-film --yes                                          # also removes the cover
 cargo run -p catalogged-cli -- import entries.csv --dry-run
-cargo run -p catalogged-cli -- import entries.csv                                 # --no-cover to skip covers
+cargo run -p catalogged-cli -- import entries.csv                                 # --no-cover to skip covers, --skip-existing to re-run safely
 ```
 
-CSV columns: `kind,title,status,rating,review,year,source,external_id,consumed_at` (`notes` is accepted as an alias for `review`). A `consumed` entry with no date is logged as today. For `source=tmdb` rows, `title` and `year` may be left blank and are filled from TMDB. Covers are downloaded from TMDB, converted to WebP (<= 300 KB), and uploaded to R2. A cover failure never loses the entry.
+CSV columns: `kind,title,status,rating,review,year,source,external_id,consumed_at` (`notes` is accepted as an alias for `review`). `add` logs a `consumed` entry with no date as today; `import` leaves the date blank. Every column is optional except that a row needs a `title` or an `external_id`. An IMDb id (`tt...`) in `external_id` fills in kind, title and year from TMDB; for a numeric TMDB id set `kind`. `status` defaults to `consumed`. `--skip-existing` makes a re-run safe. See `docs/seed-example.csv`. Covers are downloaded from TMDB, converted to WebP (<= 300 KB), and uploaded to R2. A cover failure never loses the entry.
 
 ## Admin UI
 

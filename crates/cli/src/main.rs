@@ -91,13 +91,18 @@ enum Cmd {
         kind: String,
         query: String,
     },
-    /// Bulk-add entries from a CSV with columns:
-    /// kind,title,status,rating,review,year,source,external_id,consumed_at (`notes` is accepted as an alias for `review`)
+    /// Bulk-add entries from a CSV (see docs/seed-example.csv). Columns, all optional except that a
+    /// row needs a title or an external_id: kind,title,status,rating,review,year,source,external_id,consumed_at.
+    /// An external_id like tt0133093 is an IMDb id: kind and title are looked up on TMDB.
+    /// Blank status means consumed; a blank consumed_at stays blank (imports never default to today).
     Import {
         file: PathBuf,
-        /// Parse and validate only; send nothing
+        /// Resolve ids and print what would be added; send nothing to the Worker
         #[arg(long)]
         dry_run: bool,
+        /// Treat "already exists" (409) as skipped instead of failed, so a run can be repeated safely
+        #[arg(long)]
+        skip_existing: bool,
         /// Skip fetching and uploading covers
         #[arg(long)]
         no_cover: bool,
@@ -111,6 +116,35 @@ fn today_if_consumed(status: Status) -> Option<String> {
 fn parse<T: DeserializeOwned>(s: &str) -> Result<T> {
     serde_json::from_value(serde_json::Value::String(s.to_owned()))
         .with_context(|| format!("invalid value {s:?}"))
+}
+
+/// The Worker answered 409: this id or slug already exists.
+#[derive(Debug)]
+struct Conflict(String);
+
+impl std::fmt::Display for Conflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "already exists: {}", self.0)
+    }
+}
+
+impl std::error::Error for Conflict {}
+
+/// One CSV row. Looser than `NewEntry` so a sheet can be just ids.
+#[derive(serde::Deserialize)]
+struct Row {
+    kind: Option<Kind>,
+    #[serde(default)]
+    title: String,
+    status: Option<Status>,
+    rating: Option<u8>,
+    #[serde(default, alias = "notes")]
+    review: Option<String>,
+    year: Option<i32>,
+    source: Option<Source>,
+    external_id: Option<String>,
+    #[serde(default)]
+    consumed_at: Option<String>,
 }
 
 struct Client {
@@ -140,6 +174,9 @@ impl Client {
             .send()?;
         if res.status().is_redirection() {
             bail!("{} redirect: Cloudflare Access rejected the credentials (check the service token and policy)", res.status());
+        }
+        if res.status() == reqwest::StatusCode::CONFLICT {
+            return Err(Conflict(res.text().unwrap_or_default()).into());
         }
         if !res.status().is_success() {
             bail!("{}: {}", res.status(), res.text().unwrap_or_default());
@@ -230,6 +267,12 @@ impl Tmdb {
         Ok(tmdb::parse_search(&self.get(url)?.text()?)?)
     }
 
+    /// IMDb id -> (kind, TMDB record).
+    fn find(&self, imdb_id: &str) -> Result<(Kind, tmdb::Candidate)> {
+        tmdb::parse_find(&self.get(tmdb::find_url(imdb_id))?.text()?)?
+            .with_context(|| format!("TMDB has no movie or show for {imdb_id}"))
+    }
+
     fn details(&self, kind: Kind, id: &str) -> Result<tmdb::Candidate> {
         let url = tmdb::details_url(kind, id).context("TMDB only supports movie and show")?;
         Ok(tmdb::parse_details(&self.get(url)?.text()?)?)
@@ -264,6 +307,53 @@ fn enrich(tmdb: &Tmdb, e: &mut NewEntry) -> Result<Option<String>> {
     }
     e.year = e.year.or(found.year);
     Ok(found.poster_path)
+}
+
+/// Turn a sheet row into a full entry, resolving IMDb ids through TMDB.
+fn resolve_row(tmdb: Option<&Tmdb>, row: Row) -> Result<NewEntry> {
+    let mut kind = row.kind;
+    let mut source = row.source;
+    let mut external_id = row.external_id.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
+    let mut title = row.title;
+    let mut year = row.year;
+    if let Some(id) = external_id.clone() {
+        if tmdb::is_imdb_id(&id) {
+            let t = tmdb.context("IMDb ids need TMDB_API_KEY to resolve")?;
+            let (found_kind, c) = t.find(&id)?;
+            if kind.is_some_and(|k| k != found_kind) {
+                bail!("{id} is a {}, but the row says {}", found_kind.as_str(), kind.map(|k| k.as_str()).unwrap_or(""));
+            }
+            kind = Some(found_kind);
+            source = Some(Source::Tmdb);
+            external_id = Some(c.id);
+            if title.trim().is_empty() {
+                title = c.title;
+            }
+            year = year.or(c.year);
+        } else if source.is_none() {
+            source = Some(Source::Tmdb);
+        }
+    }
+    let kind = kind.context("kind is required unless external_id is an IMDb id (tt...)")?;
+    if let (true, Some(Source::Tmdb), Some(id), Some(t)) = (title.trim().is_empty(), source, &external_id, tmdb) {
+        let c = t.details(kind, id)?;
+        title = c.title;
+        year = year.or(c.year);
+    }
+    if title.trim().is_empty() && external_id.is_none() {
+        bail!("a row needs a title or an external_id");
+    }
+    Ok(NewEntry {
+        kind,
+        title,
+        status: row.status.unwrap_or(Status::Consumed),
+        rating: row.rating.filter(|r| *r != 0),
+        review: row.review.filter(|r| !r.is_empty()),
+        year,
+        source,
+        external_id,
+        consumed_at: row.consumed_at.filter(|d| !d.is_empty()),
+    })
 }
 
 /// Create the entry, then (best effort) upload its cover. A cover failure never loses the entry.
@@ -338,35 +428,53 @@ fn main() -> Result<()> {
                 println!("{:>8}  {}{}", c.id, c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
             }
         }
-        Cmd::Import { file, dry_run, no_cover } => {
+        Cmd::Import { file, dry_run, skip_existing, no_cover } => {
             let mut rdr = csv::Reader::from_path(file)?;
-            let entries = rdr
-                .deserialize::<NewEntry>()
+            let rows = rdr
+                .deserialize::<Row>()
                 .enumerate()
                 .map(|(i, r)| r.with_context(|| format!("row {}", i + 2)))
                 .collect::<Result<Vec<_>>>()?;
-            println!("parsed {} entries", entries.len());
-            if *dry_run {
-                return Ok(());
-            }
-            let client = Client::new(&cli)?;
+            println!("read {} rows", rows.len());
             let tmdb = Tmdb::new(cli.tmdb_key.as_ref()).ok();
-            let mut failed = 0;
-            for mut e in entries {
-                if e.consumed_at.is_none() {
-                    e.consumed_at = today_if_consumed(e.status);
-                }
-                let label = if e.title.is_empty() { e.external_id.clone().unwrap_or_default() } else { e.title.clone() };
-                match add_one(&client, tmdb.as_ref(), e, !no_cover) {
-                    Ok(title) => println!("ok    {title}"),
+            let client = if *dry_run { None } else { Some(Client::new(&cli)?) };
+            let (mut added, mut skipped) = (0, 0);
+            let mut failures: Vec<String> = vec![];
+            for (i, row) in rows.into_iter().enumerate() {
+                let line = i + 2;
+                let entry = match resolve_row(tmdb.as_ref(), row).and_then(|e| e.validate().map_err(anyhow::Error::msg).map(|_| e)) {
+                    Ok(e) => e,
                     Err(err) => {
-                        failed += 1;
-                        eprintln!("FAIL  {label}: {err:#}");
+                        eprintln!("FAIL  row {line}: {err:#}");
+                        failures.push(format!("row {line}: {err:#}"));
+                        continue;
+                    }
+                };
+                let label = format!("{} ({} {})", entry.title, entry.kind.as_str(), entry.year.map(|y| y.to_string()).unwrap_or_default());
+                let Some(client) = &client else {
+                    println!("would add  {label}");
+                    continue;
+                };
+                match add_one(client, tmdb.as_ref(), entry, !no_cover) {
+                    Ok(title) => {
+                        added += 1;
+                        println!("ok    {title}");
+                    }
+                    Err(err) if *skip_existing && err.downcast_ref::<Conflict>().is_some() => {
+                        skipped += 1;
+                        println!("skip  {label}");
+                    }
+                    Err(err) => {
+                        eprintln!("FAIL  row {line} {label}: {err:#}");
+                        failures.push(format!("row {line} {label}: {err:#}"));
                     }
                 }
+                // Be polite to TMDB and the Worker; also keeps a big import from bursting.
+                std::thread::sleep(std::time::Duration::from_millis(250));
             }
-            if failed > 0 {
-                bail!("{failed} entries failed");
+            println!("added {added}, skipped {skipped}, failed {}", failures.len());
+            if !failures.is_empty() {
+                bail!("{} rows failed:\n  {}", failures.len(), failures.join("\n  "));
             }
         }
     }

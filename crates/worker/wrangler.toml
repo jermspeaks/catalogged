@@ -2,6 +2,10 @@ name = "catalogged"
 main = "build/worker/shim.mjs"
 compatibility_date = "2026-11-01"
 
+[vars]
+# Public R2 domain for covers (set after connecting the domain to the bucket). Empty = Worker serves /covers.
+COVERS_BASE_URL = ""
+
 [build]
 command = "cargo install -q worker-build && worker-build --release"
 

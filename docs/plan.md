@@ -39,19 +39,19 @@ Other standing decisions: statuses are `wanted | in_progress | consumed`; `consu
 Roughly in order. Items marked **(you)** need something from the owner.
 
 ### 1. Ship what is merged
-- Apply migration `0002` to the remote database, **then** deploy (the new code reads `review`). Order matters.
+- Done: migration `0002` applied and PR #3 deployed (by the owner).
 - **(you)** Click through `/admin` in a browser: search, add, edit, delete, and cover upload. This has never been exercised.
 
 ### 2. Seed import (CSV of TMDB / IMDb ids)
-- **(you)** Provide the CSV. Minimum: one id column. Ideal columns: `kind` (movie/show), `tmdb_id` or `imdb_id` (`tt...`), and optionally `status`, `rating`, `review`, `consumed_at`.
-- IMDb ids resolve through TMDB's `GET /3/find/{imdb_id}?external_source=imdb_id`, which returns `movie_results` and `tv_results`; the result tells us the kind and the TMDB id, and entries are stored as `source=tmdb` so de-duplication keeps working.
-- CLI `import` improvements for a large run: `--skip-existing` (treat a 409 as "already there", not a failure), a resolved-titles preview in `--dry-run`, steady pacing for TMDB, and a summary of failures at the end so it can be re-run.
+- Built: `catalogged import` accepts a sheet of any shape in [seed-example.csv](seed-example.csv). A row needs a `title` or an `external_id`; an IMDb id (`tt...`) resolves through TMDB's `/find` to the kind, TMDB id, title and year (stored as `source=tmdb`, so de-duplication keeps working). Blank `status` means consumed; a blank `consumed_at` stays blank (imports never default to today).
+- `--dry-run` resolves ids and prints what would be added without touching the Worker; `--skip-existing` treats a 409 as skipped so the same file can be re-run; a summary lists every failed row; there is a 250 ms pause per row.
+- **(you)** Fill in the sheet in whatever order suits you, then run `--dry-run` first. Do a small batch (10 rows) for real before the full file.
 - Budget (estimates, not measured): each entry costs roughly 10 D1 row writes (the insert plus index entries, and a second write when the cover is attached) and one R2 write. 5,000 entries is therefore about half of one day's 100k D1 write budget: run it in one or two batches, and do not retry in a loop. See [free-tier.md](free-tier.md).
 
 ### 3. Covers on a public bucket domain
 - **Recommendation: yes, use `covers.05152024.xyz`** (pending your confirmation after the trade-offs below). The main reason: every request that reaches the Worker counts against the free 100k requests/day, even a cache hit, so a page of 60 covers served through the Worker costs 61 Worker requests; from a bucket domain it costs 1.
-- **(you)** Connect the subdomain to the `catalogged-covers` bucket as a custom domain, and leave the `r2.dev` URL disabled. to the `catalogged-covers` bucket as a custom domain, and leave the `r2.dev` URL disabled.
-- Add a `COVERS_BASE_URL` var; pages emit `{COVERS_BASE_URL}/{cover_key}`. Keep the Worker `/covers/...` route as the local-dev fallback when the var is unset.
+- **(you)** Connect the subdomain In the dashboard: R2, `catalogged-covers`, Settings, Custom Domains, Add `covers.05152024.xyz`. Leave the `r2.dev` URL disabled.
+- Built: `COVERS_BASE_URL` var (empty in `wrangler.toml`); pages emit `{COVERS_BASE_URL}/{cover_key}` when it is set, else the Worker `/covers/...` route (kept as the local-dev fallback). Once the domain works, a one-line PR sets it to `https://covers.05152024.xyz`.
 - Make cover keys immutable by including a short content hash (e.g. `movie/the-matrix-3fa9c1d2.webp`), computed in the Worker with WebCrypto at upload. Replacing a cover then writes a new key and deletes the old one, so a long CDN TTL can never serve a stale image. Needs a migration only if existing keys must be rewritten (they can stay as-is until replaced).
 - Edge caching on that domain is zone-level (Cache Rules), separate from the Worker's Cache API. Confirm the default caching behaviour for `.webp` on an R2 custom domain, and set a rule if needed, so repeat views are not R2 Class B reads (free: 10M/month).
 - Consider a rate-limit or hotlink rule on the covers hostname, since the bucket is public (verify what the free plan offers).
@@ -99,5 +99,7 @@ At personal-site traffic both are fine; the bucket domain mainly buys headroom a
 
 ## Open questions
 
-- **Seed CSV:** what columns does the file from your other project have (ids only, or also status, rating, dates), and roughly how many rows? Are the ids IMDb (`tt...`), TMDB, or a mix?
-- **Covers domain:** confirm `covers.05152024.xyz` after reading the trade-offs in item 3.
+- **Covers domain:** confirmed. Waiting on the dashboard step above.
+- **Dark mode** (added to discovery.md): light, dark and follow-the-system. Plan: CSS `prefers-color-scheme` variables for the default, plus an optional toggle stored in `localStorage`. Do it with the public site in item 7.
+- **Colour palette** (added to discovery.md): `#c6d8ff #71a9f7 #6b5ca5 #72195a #4c1036`. Use it for the public site theme (item 7); the dark palette needs its own contrast check.
+- **E2E testing** (added to discovery.md): a dev environment where every admin function and the public read pages can be exercised. Plan: a local `wrangler dev` run against a throwaway local D1 and R2 (no production data, no cost), driven by a scripted smoke test of the admin API and public pages; browser-level tests for the admin JS later. Scheduled after item 7.
