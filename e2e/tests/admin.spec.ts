@@ -119,3 +119,51 @@ test('adding a duplicate reports the error', async ({ page, request }) => {
   await form.getByRole('button', { name: 'Add' }).click();
   await expect(page.locator('#msg')).toContainText('409');
 });
+
+test('edit page: find a cover by searching sources (provider mocked)', async ({ page, request }) => {
+  const slug = await seed(request, { kind: 'movie', title: 'E2E Cover Search', status: 'consumed' });
+  await page.route('**/mock-poster.png', (r) => r.fulfill({ contentType: 'image/png', body: png(200, 300) }));
+  let searched = '';
+  await page.route('**/admin/api/search*', (r) => {
+    searched = new URL(r.request().url()).searchParams.get('q') ?? '';
+    return r.fulfill({ json: [
+      { id: '1', title: 'No Cover Film', year: 2001, cover_url: null, thumb_url: null, overview: null },
+      { id: '2', title: 'E2E Cover Search', year: 2019, cover_url: 'http://localhost:8788/mock-poster.png', thumb_url: null, overview: null },
+    ] });
+  });
+  await page.goto(`/admin/edit/movie/${slug}`);
+  await expect(page.locator('#coverq')).toHaveValue('E2E Cover Search'); // prefilled with the title
+  await page.locator('summary', { hasText: 'Find a cover' }).click();
+  await page.locator('#coversearch').getByRole('button', { name: 'Search' }).click();
+  await expect(page.locator('#coverresults li')).toHaveCount(1); // results without a cover are hidden
+  await page.getByRole('button', { name: 'Use this cover' }).click();
+  await expect(page.locator('#msg')).toContainText('Cover updated');
+  expect(searched).toBe('E2E Cover Search');
+  const src = (await page.locator('#coverimg').getAttribute('src'))!;
+  expect((await entry(request, 'movie', slug)).body.cover_key).toMatch(/^movie\/.+-[0-9a-f]{8}\.webp$/);
+  expect((await request.get(src)).status()).toBe(200);
+});
+
+test('edit page: cover from a link falls back to the Worker relay when the host blocks the browser', async ({ page, request }) => {
+  const slug = await seed(request, { kind: 'movie', title: 'E2E Cover Link', status: 'consumed' });
+  await page.route('https://img.example.test/**', (r) => r.abort()); // no CORS: the direct read fails
+  let relayed = '';
+  await page.route('**/admin/api/image*', (r) => {
+    relayed = new URL(r.request().url()).searchParams.get('url') ?? '';
+    return r.fulfill({ contentType: 'image/png', body: png(120, 180) });
+  });
+  await page.goto(`/admin/edit/movie/${slug}`);
+  await page.locator('summary', { hasText: 'Use a link' }).click();
+  await page.fill('#coverurl', 'https://img.example.test/poster.png');
+  await page.getByRole('button', { name: 'Use link' }).click();
+  await expect(page.locator('#msg')).toContainText('Cover updated');
+  expect(relayed).toBe('https://img.example.test/poster.png');
+  expect((await entry(request, 'movie', slug)).body.cover_key).toBeTruthy();
+});
+
+test('image relay refuses unsafe links', async ({ request }) => {
+  for (const url of ['http://example.com/a.png', 'https://localhost/a.png', 'https://127.0.0.1/a.png', 'https://example.com:8443/a.png', 'ftp://x.com/a.png']) {
+    const r = await request.get(`/admin/api/image?url=${encodeURIComponent(url)}`);
+    expect(r.status(), url).toBe(400);
+  }
+});

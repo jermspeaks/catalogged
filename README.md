@@ -64,15 +64,18 @@ cargo run -p catalogged-cli -- add --kind movie --source tmdb --external-id 4951
 cargo run -p catalogged-cli -- add --kind movie --title "Some Film" --status consumed --rating 8 --review "Loved it" --date 2026-11-20   # manual entry
 cargo run -p catalogged-cli -- edit --kind movie --slug some-film --rating 9 --review "Better on rewatch"          # only passed flags change
 cargo run -p catalogged-cli -- delete --kind movie --slug some-film --yes                                          # also removes the cover
+cargo run -p catalogged-cli -- match log.csv log-matched.csv                      # find provider ids for rows that have none; review before importing
 cargo run -p catalogged-cli -- import entries.csv --dry-run
 cargo run -p catalogged-cli -- import entries.csv                                 # --no-cover to skip covers, --skip-existing to re-run safely
 ```
 
 CSV columns: `kind,title,status,rating,review,year,source,external_id,consumed_at` (`notes` is accepted as an alias for `review`). `add` logs a `consumed` entry with no date as today; `import` leaves the date blank. Every column is optional except that a row needs a `title` or an `external_id`. An IMDb id (`tt...`) in `external_id` fills in kind, title and year from TMDB; for any other provider id set `kind` (the source follows from it: movie/show = TMDB, book = Open Library work id, game = IGDB id). `status` defaults to `consumed`. `--skip-existing` makes a re-run safe. See `docs/seed-example.csv`. Covers are downloaded from the provider (TMDB, Open Library or IGDB), converted to WebP (<= 300 KB), and uploaded to R2. A cover failure never loses the entry.
 
+`match` is for sheets with titles but no ids (for example a reading log). It searches TMDB / Open Library / IGDB for each row without an `external_id` (books also use an `author` column) and writes a new CSV with `source`, `external_id` and `year` filled in, plus `match` (`high`: exact title and year agree; `check`: exact title but several records share it, so confirm the pick; `none`: nothing matched), `match_title` and `candidates` (top three, as `id: title (year)`). Fix the `check` and `none` rows by hand (copy an id from `candidates`, or clear `external_id` to add the row without a provider), then run `import`. Rows that already have an id pass through. Nothing is sent to the Worker. Entries with an id get covers on import; entries without one get none, and you can add one from the edit page.
+
 ## Admin UI
 
-`/admin` (behind Cloudflare Access): search (movies, shows, books, games) and Add; Add by id (TMDB, IMDb `tt...`, Open Library work id, IGDB id); Add manually with an optional cover file. Each catalogue row opens an edit page with every field, a cover upload/replace, and Delete behind a confirm dialog. The browser converts covers to WebP with a canvas (scaled to <= 500 px wide) and uploads them. Game search in production needs the IGDB Worker secrets (see docs/plan.md item 5).
+`/admin` (behind Cloudflare Access): search (movies, shows, books, games) and Add; Add by id (TMDB, IMDb `tt...`, Open Library work id, IGDB id); Add manually with an optional cover file. Each catalogue row opens an edit page with every field, a cover upload/replace, Find a cover (searches the same provider as adding, prefilled with the title), Use a link to an image (the Worker relays the file because most hosts block browsers from reading it; https hostnames only, images up to 10 MB), and Delete behind a confirm dialog. The browser converts covers to WebP with a canvas (scaled to <= 500 px wide) and uploads them. Game search in production needs the IGDB Worker secrets (see docs/plan.md item 5).
 
 ## End-to-end tests
 

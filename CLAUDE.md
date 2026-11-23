@@ -27,6 +27,7 @@ cd e2e && npm test                                 # end-to-end tests (Playwrigh
 - Public GETs (not `/admin`) are cached with the Cache API in the `fetch` entrypoint; a response is cached only if it sets `Cache-Control`. Public changes can lag up to 5 minutes.
 - `/admin` also verifies the Cloudflare Access JWT in the Worker (`crates/worker/src/access.rs`, claim logic in `crates/core/src/access.rs`). It fails closed unless `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are set in `wrangler.toml` (or `ACCESS_JWT_OPTIONAL=1` for local dev). See `docs/operations.md`, which also covers backups (`scripts/backup.sh`) and Time Travel.
 - `e2e/`: Playwright tests that start `wrangler dev` themselves (state in `e2e/.state`, wiped each run; port 8788). Providers are mocked in the browser, so no external services or keys are needed. `DISABLE_CACHE=1` (set only by the e2e config) turns off the Cache API so writes show up immediately. Add a test when you add an admin or public feature.
+- `catalogged match` (CLI) fills provider ids for id-less CSV rows using `crates/core/src/matching.rs`; `/admin/api/image` relays remote cover images for the browser to convert (validation in `crates/core/src/imageurl.rs`).
 - The admin UI and CLI share one write endpoint so validation lives in the Worker.
 
 ## What this is

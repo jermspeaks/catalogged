@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod access;
 pub mod igdb;
+pub mod imageurl;
+pub mod matching;
 pub mod openlibrary;
 pub mod tmdb;
 
@@ -55,6 +57,16 @@ pub enum Source {
     Tmdb,
     Igdb,
     OpenLibrary,
+}
+
+impl Source {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Source::Tmdb => "tmdb",
+            Source::Igdb => "igdb",
+            Source::OpenLibrary => "open_library",
+        }
+    }
 }
 
 /// An entry as stored in D1 and returned by the API.
