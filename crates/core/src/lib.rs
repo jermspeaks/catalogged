@@ -60,6 +60,15 @@ pub enum Source {
 }
 
 impl Source {
+    /// The provider an entry of this kind uses.
+    pub fn for_kind(kind: Kind) -> Source {
+        match kind {
+            Kind::Movie | Kind::Show => Source::Tmdb,
+            Kind::Book => Source::OpenLibrary,
+            Kind::Game => Source::Igdb,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Source::Tmdb => "tmdb",
@@ -126,6 +135,12 @@ pub struct EditEntry {
     pub review: Option<String>,
     pub year: Option<i32>,
     pub consumed_at: Option<String>,
+    /// The provider record this entry is. A PUT replaces the whole entry: send the current values to
+    /// keep them, or both null to clear. `source` must be the provider for the entry's kind.
+    #[serde(default)]
+    pub source: Option<Source>,
+    #[serde(default)]
+    pub external_id: Option<String>,
 }
 
 pub const MAX_REVIEW_CHARS: usize = 20_000;
@@ -164,7 +179,21 @@ impl NewEntry {
 
 impl EditEntry {
     pub fn validate(&self) -> Result<(), String> {
-        validate_fields(&self.title, self.rating, &self.review, &self.consumed_at)
+        validate_fields(&self.title, self.rating, &self.review, &self.consumed_at)?;
+        match (self.source, self.external_id.as_deref().map(str::trim)) {
+            (None, None) => Ok(()),
+            (Some(_), Some(id)) if !id.is_empty() && id.len() <= 64 && !id.contains(char::is_whitespace) => Ok(()),
+            _ => Err("source and external_id go together; the id must be 1-64 characters with no spaces".into()),
+        }
+    }
+
+    /// Also checks that `source` is the provider for `kind` (movie/show = TMDB, book = Open Library, game = IGDB).
+    pub fn validate_for(&self, kind: Kind) -> Result<(), String> {
+        self.validate()?;
+        match self.source {
+            Some(s) if s != Source::for_kind(kind) => Err(format!("a {} comes from {}, not {}", kind.as_str(), Source::for_kind(kind).as_str(), s.as_str())),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -186,13 +215,24 @@ pub fn slugify(title: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn edit_provider_id_rules() {
+        let mk = |source, id: Option<&str>| EditEntry { title: "T".into(), status: Status::Consumed, rating: None, review: None, year: None, consumed_at: None, source, external_id: id.map(Into::into) };
+        assert!(mk(None, None).validate().is_ok());
+        assert!(mk(Some(Source::Tmdb), Some("603")).validate_for(Kind::Movie).is_ok());
+        assert!(mk(Some(Source::Tmdb), None).validate().is_err());
+        assert!(mk(None, Some("603")).validate().is_err());
+        assert!(mk(Some(Source::Tmdb), Some("6 03")).validate().is_err());
+        assert!(mk(Some(Source::Tmdb), Some("603")).validate_for(Kind::Book).is_err());
+    }
+
     use super::*;
 
     #[test]
     fn dates_and_validation() {
         assert!(valid_date("2026-11-23"));
         assert!(!valid_date("2026-13-01") && !valid_date("26-11-23") && !valid_date("2026/11/23"));
-        let mut e = EditEntry { title: "x".into(), status: Status::Consumed, rating: Some(11), review: None, year: None, consumed_at: None };
+        let mut e = EditEntry { title: "x".into(), status: Status::Consumed, rating: Some(11), review: None, year: None, consumed_at: None, source: None, external_id: None };
         assert!(e.validate().is_err());
         e.rating = Some(10);
         e.consumed_at = Some("2026-02-30x".into());

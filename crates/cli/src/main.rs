@@ -79,6 +79,9 @@ enum Cmd {
         date: Option<String>,
         #[arg(long)]
         year: Option<i32>,
+        /// Provider id (TMDB id, Open Library work id or IGDB id; the provider follows from the kind). Empty string clears it
+        #[arg(long)]
+        external_id: Option<String>,
     },
     /// Delete an entry (and its cover)
     Delete {
@@ -115,7 +118,7 @@ enum Cmd {
     },
     /// Find and upload covers for entries that have none (for example title-only imports): reads the
     /// public /index.json, searches the provider for each cover-less entry by title and year, and
-    /// uploads the cover of an exact-title match. Re-runnable: entries that already have a cover are skipped.
+    /// uploads the cover of an exact-title match and stores the provider id (and year, if missing) on the entry. Re-runnable: entries that already have a cover are skipped.
     Covers {
         /// Only this kind: game | book | show | movie
         #[arg(long)]
@@ -129,6 +132,9 @@ enum Cmd {
         /// Stop after this many uploads (a first try before the full run)
         #[arg(long)]
         limit: Option<usize>,
+        /// Don't touch covers: store the provider id on entries that have none, including ones that already have a cover
+        #[arg(long)]
+        ids_only: bool,
     },
     /// Find provider ids for rows that have none: searches TMDB / Open Library / IGDB by title (and
     /// author for books) and writes a new CSV with source, external_id and year filled in, plus
@@ -530,8 +536,27 @@ fn match_csv(meta: &Meta, input: &PathBuf, output: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+/// Stores the provider id on an existing entry (unless it already has one).
+fn set_provider_id(client: &Client, kind: Kind, slug: &str, c: &Candidate) -> Result<()> {
+    let cur = client.get_entry(kind, slug)?;
+    if cur.external_id.is_some() {
+        return Ok(());
+    }
+    let edit = EditEntry {
+        title: cur.title,
+        status: cur.status,
+        rating: cur.rating,
+        review: cur.review,
+        year: cur.year.or(c.year),
+        consumed_at: cur.consumed_at,
+        source: Some(default_source(kind)),
+        external_id: Some(c.id.clone()),
+    };
+    client.edit_entry(kind, slug, &edit)
+}
+
 /// Cover-less entries from the public index, searched on the provider and filled in (see `Cmd::Covers`).
-fn find_covers(client: &Client, meta: &Meta, only: Option<Kind>, dry_run: bool, accept_check: bool, limit: Option<usize>) -> Result<()> {
+fn find_covers(client: &Client, meta: &Meta, only: Option<Kind>, dry_run: bool, accept_check: bool, limit: Option<usize>, ids_only: bool) -> Result<()> {
     // Rows are [kind, slug, title, status, rating, year, cover_key, consumed_at, updated_at].
     let index: serde_json::Value = client.http.get(format!("{}/index.json", client.url)).send()?.error_for_status()?.json()?;
     let items = index["items"].as_array().context("unexpected /index.json shape")?;
@@ -541,7 +566,11 @@ fn find_covers(client: &Client, meta: &Meta, only: Option<Kind>, dry_run: bool, 
         let (Some(kind), Some(slug), Some(title)) = (it[0].as_str().and_then(|k| parse::<Kind>(k).ok()), it[1].as_str(), it[2].as_str()) else {
             continue;
         };
-        if it[6].as_str().is_some_and(|k| !k.is_empty()) || only.is_some_and(|k| k != kind) {
+        let has_cover = it[6].as_str().is_some_and(|k| !k.is_empty());
+        if (has_cover && !ids_only) || only.is_some_and(|k| k != kind) {
+            continue;
+        }
+        if ids_only && client.get_entry(kind, slug).is_ok_and(|e| e.external_id.is_some()) {
             continue;
         }
         if limit.is_some_and(|l| done >= l) {
@@ -569,7 +598,7 @@ fn find_covers(client: &Client, meta: &Meta, only: Option<Kind>, dry_run: bool, 
             matching::Confidence::Check => accept_check,
             matching::Confidence::None => false,
         };
-        let Some(c) = pick.map(|i| &found[i]).filter(|c| take && c.cover_url.is_some()) else {
+        let Some(c) = pick.map(|i| &found[i]).filter(|c| take && (ids_only || c.cover_url.is_some())) else {
             let first = found.first().map(|c| format!(" (first result: {}{})", c.title, c.year.map(|y| format!(" {y}")).unwrap_or_default())).unwrap_or_default();
             unmatched.push(format!("{} [{}]{first}", title, conf.as_str()));
             std::thread::sleep(std::time::Duration::from_millis(250));
@@ -577,10 +606,24 @@ fn find_covers(client: &Client, meta: &Meta, only: Option<Kind>, dry_run: bool, 
         };
         let label = format!("{title} -> {}{}", c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
         if dry_run {
-            println!("would set cover  {label}  [{}]", conf.as_str());
+            println!("would set {}  {label}  [{}]", if ids_only { "id" } else { "cover" }, conf.as_str());
+        } else if ids_only {
+            match set_provider_id(client, kind, slug, c) {
+                Ok(()) => println!("id  {label}"),
+                Err(e) => {
+                    failed.push(format!("{title}: {e:#}"));
+                    continue;
+                }
+            }
         } else {
             match meta.cover_webp(c.cover_url.as_deref().unwrap_or_default()).and_then(|w| client.put_cover(kind, slug, w)) {
-                Ok(()) => println!("cover  {label}"),
+                Ok(()) => {
+                    println!("cover  {label}");
+                    // Remember which provider record this is (needs the entry's other fields, as PUT replaces them).
+                    if let Err(e) = set_provider_id(client, kind, slug, c) {
+                        failed.push(format!("{title}: cover set, but saving the id failed: {e:#}"));
+                    }
+                }
                 Err(e) => {
                     failed.push(format!("{title}: {e:#}"));
                     continue;
@@ -624,7 +667,7 @@ fn main() -> Result<()> {
             let title = add_one(&Client::new(&cli)?, &Meta::new(&cli)?, entry, !no_cover)?;
             println!("added {title}");
         }
-        Cmd::Edit { kind, slug, title, status, rating, review, date, year } => {
+        Cmd::Edit { kind, slug, title, status, rating, review, date, year, external_id } => {
             let kind = parse::<Kind>(kind)?;
             let client = Client::new(&cli)?;
             let cur = client.get_entry(kind, slug)?;
@@ -636,8 +679,14 @@ fn main() -> Result<()> {
                 review: blank(review).unwrap_or(cur.review),
                 year: year.or(cur.year),
                 consumed_at: blank(date).unwrap_or(cur.consumed_at),
+                source: match blank(external_id) {
+                    Some(None) => None,
+                    Some(Some(_)) => Some(default_source(kind)),
+                    None => cur.source,
+                },
+                external_id: blank(external_id).unwrap_or(cur.external_id),
             };
-            edit.validate().map_err(anyhow::Error::msg)?;
+            edit.validate_for(kind).map_err(anyhow::Error::msg)?;
             client.edit_entry(kind, slug, &edit)?;
             println!("updated {}", edit.title);
         }
@@ -654,9 +703,9 @@ fn main() -> Result<()> {
                 println!("{:>8}  {}{}", c.id, c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
             }
         }
-        Cmd::Covers { kind, dry_run, accept_check, limit } => {
+        Cmd::Covers { kind, dry_run, accept_check, limit, ids_only } => {
             let kind = kind.as_deref().map(parse::<Kind>).transpose()?;
-            find_covers(&Client::new(&cli)?, &Meta::new(&cli)?, kind, *dry_run, *accept_check, *limit)?
+            find_covers(&Client::new(&cli)?, &Meta::new(&cli)?, kind, *dry_run, *accept_check, *limit, *ids_only)?
         }
         Cmd::Match { input, output } => match_csv(&Meta::new(&cli)?, input, output)?,
         Cmd::Import { file, dry_run, skip_existing, no_cover } => {

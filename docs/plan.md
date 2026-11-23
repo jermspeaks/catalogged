@@ -86,7 +86,8 @@ At personal-site traffic both are fine; the bucket domain mainly buys headroom a
 ### 6b. Matching and cover search: built
 - `catalogged match in.csv out.csv` fills provider ids for id-less rows (see README). Pure picking logic is in `crates/core/src/matching.rs` (exact normalised title; year within 1 separates remakes; otherwise `check`). Not done: fuzzy matching for misspelt titles; those rows come back `none` with candidates to choose from.
 - Edit page: search a provider for a cover, or paste an image link. `GET /admin/api/image?url=` relays the remote image (https, public hostname, image/* only, 10 MB cap; one subrequest and no decoding, so no CPU cost). The browser converts to WebP as before.
-- `catalogged covers` is the bulk cover finder for existing cover-less entries (exact title, ignoring records newer than the logged year). It sets covers only; storing source/external_id on existing entries needs an API change (not done).
+- `catalogged covers` is the bulk cover finder for existing cover-less entries (exact title, ignoring records newer than the logged year). It also stores source/external_id (and the year if missing); `--ids-only` backfills ids for entries that already have a cover.
+- The edit API (`PUT /admin/api/entries/{kind}/{slug}`) now takes `source` and `external_id` (both or neither; source must match the kind; a duplicate id is a 409). A PUT replaces the entry, so clients must send the current values to keep them. The edit page has a provider-id field.
 - Still open (in discovery.md): a placeholder image for entries without a cover.
 
 ### 7. Public site: grid, filter, sort, search

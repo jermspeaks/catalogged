@@ -422,7 +422,8 @@ async fn edit_entry(
     Json(edit): Json<EditEntry>,
 ) -> Result<Json<Entry>, ApiErr> {
     admin_guard(&state.env)?;
-    edit.validate().map_err(|m| (StatusCode::BAD_REQUEST, m))?;
+    let kind_enum = serde_json::from_value::<Kind>(serde_json::Value::String(kind.clone())).map_err(|_| (StatusCode::BAD_REQUEST, "bad kind".to_string()))?;
+    edit.validate_for(kind_enum).map_err(|m| (StatusCode::BAD_REQUEST, m))?;
     if find_entry(&state.env, &kind, &slug).await.map_err(internal)?.is_none() {
         return Err((StatusCode::NOT_FOUND, "no such entry".into()));
     }
@@ -432,7 +433,7 @@ async fn edit_entry(
         .map_err(internal)?
         .prepare(
             "UPDATE entries SET title = ?1, status = ?2, rating = ?3, review = ?4, year = ?5, consumed_at = ?6, \
-             updated_at = datetime('now') WHERE kind = ?7 AND slug = ?8",
+             source = ?7, external_id = ?8, updated_at = datetime('now') WHERE kind = ?9 AND slug = ?10",
         )
         .bind(&[
             edit.title.trim().into(),
@@ -441,13 +442,16 @@ async fn edit_entry(
             opt(edit.review.filter(|r| !r.trim().is_empty())),
             opt(edit.year.map(f64::from)),
             opt(edit.consumed_at.filter(|d| !d.is_empty())),
+            opt(edit.source.map(|s| s.as_str())),
+            opt(edit.external_id.map(|i| i.trim().to_owned())),
             kind.clone().into(),
             slug.clone().into(),
         ])
         .map_err(internal)?
         .run()
         .await
-        .map_err(internal)?;
+        // A UNIQUE violation means another entry of this kind already has that provider id.
+        .map_err(|e| (StatusCode::CONFLICT, e.to_string()))?;
     let updated = find_entry(&state.env, &kind, &slug).await.map_err(internal)?;
     updated.map(Json).ok_or((StatusCode::NOT_FOUND, "no such entry".into()))
 }
