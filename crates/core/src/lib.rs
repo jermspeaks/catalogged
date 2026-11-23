@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod access;
 pub mod igdb;
 pub mod openlibrary;
 pub mod tmdb;

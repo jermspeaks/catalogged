@@ -5,6 +5,10 @@ compatibility_date = "2026-11-01"
 [vars]
 # Public R2 domain for covers (set after connecting the domain to the bucket). Empty = Worker serves /covers (local dev uses .dev.vars to override).
 COVERS_BASE_URL = "https://covers.05152024.xyz"
+# Access JWT verification for /admin (docs/operations.md). Both are required in production: with
+# either empty the admin answers 503 (fails closed). Not secrets.
+ACCESS_TEAM_DOMAIN = ""  # https://<team>.cloudflareaccess.com
+ACCESS_AUD = ""          # the Access application's Audience (AUD) tag
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"

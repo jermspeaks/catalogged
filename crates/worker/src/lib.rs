@@ -1,3 +1,4 @@
+mod access;
 mod admin_ui;
 mod public_ui;
 
@@ -73,6 +74,13 @@ async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<http::Respon
     // DISABLE_CACHE=1 is for the e2e tests only (so writes show up immediately); never set it in production.
     let cache_off = env.var("DISABLE_CACHE").map(|v| v.to_string()).ok().as_deref() == Some("1");
     let cacheable = !cache_off && req.method() == http::Method::GET && !req.uri().path().starts_with("/admin");
+    if req.uri().path().starts_with("/admin") {
+        if let Err((code, msg)) = access::verify(&env, req.headers()).await {
+            let mut res = Response::error(msg, code)?;
+            res.headers_mut().set("cache-control", "no-store")?;
+            return Ok(res.try_into()?);
+        }
+    }
     let key = cache_key(&req.uri().to_string());
     let cache = Cache::default();
     if cacheable {
