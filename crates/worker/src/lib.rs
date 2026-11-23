@@ -9,7 +9,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use catalogged_core::{slugify, tmdb, EditEntry, Entry, Kind, NewEntry, MAX_COVER_BYTES};
+use catalogged_core::{igdb, openlibrary, slugify, tmdb, EditEntry, Entry, Kind, NewEntry, MAX_COVER_BYTES};
 use maud::{html, Markup, DOCTYPE};
 use serde::Deserialize;
 use tower_service::Service;
@@ -436,16 +436,58 @@ async fn tmdb_get(env: &Env, url: String) -> Result<String> {
     res.text().await
 }
 
+async fn send_text(url: &str, init: RequestInit, what: &str) -> Result<String> {
+    let mut res = Fetch::Request(Request::new_with_init(url, &init)?).send().await?;
+    if res.status_code() != 200 {
+        return Err(Error::RustError(format!("{what} returned {}", res.status_code())));
+    }
+    res.text().await
+}
+
+async fn open_library_get(url: &str) -> Result<String> {
+    let headers = Headers::new();
+    headers.set("Accept", "application/json")?;
+    headers.set("User-Agent", "catalogged-personal/0.1")?;
+    let mut init = RequestInit::new();
+    init.with_headers(headers);
+    send_text(url, init, "Open Library").await
+}
+
+/// IGDB needs a Twitch app token first. Two subrequests per admin search (limit 50), which is fine
+/// for a single-user admin; revisit with Cache API caching if searches ever become frequent.
+async fn igdb_post(env: &Env, body: String) -> Result<String> {
+    let id = env.secret("IGDB_CLIENT_ID")?.to_string();
+    let secret = env.secret("IGDB_CLIENT_SECRET")?.to_string();
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post);
+    let token = igdb::parse_token(&send_text(&igdb::token_url(&id, &secret), init, "Twitch token").await?)
+        .map_err(|e| Error::RustError(e.to_string()))?;
+    let headers = Headers::new();
+    headers.set("Client-ID", &id)?;
+    headers.set("Authorization", &format!("Bearer {token}"))?;
+    headers.set("Accept", "application/json")?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post).with_headers(headers).with_body(Some(JsValue::from_str(&body)));
+    send_text(igdb::GAMES_URL, init, "IGDB").await
+}
+
 #[worker::send]
 async fn search(
     State(state): State<AppState>,
     Query(q): Query<SearchQuery>,
-) -> Result<Json<Vec<tmdb::Candidate>>, ApiErr> {
+) -> Result<Json<Vec<catalogged_core::Candidate>>, ApiErr> {
     admin_guard(&state.env)?;
-    let url = tmdb::search_url(q.kind, q.q.trim())
-        .ok_or((StatusCode::BAD_REQUEST, "kind not supported by TMDB".to_string()))?;
-    let body = tmdb_get(&state.env, url).await.map_err(internal)?;
-    let mut hits = tmdb::parse_search(&body).map_err(internal)?;
+    let term = q.q.trim();
+    let mut hits = match q.kind {
+        Kind::Movie | Kind::Show => {
+            let url = tmdb::search_url(q.kind, term).ok_or((StatusCode::BAD_REQUEST, "unsupported kind".to_string()))?;
+            tmdb::parse_search(&tmdb_get(&state.env, url).await.map_err(internal)?).map_err(internal)?
+        }
+        Kind::Book => openlibrary::parse_search(&open_library_get(&openlibrary::search_url(term)).await.map_err(internal)?)
+            .map_err(internal)?,
+        Kind::Game => igdb::parse_games(&igdb_post(&state.env, igdb::search_body(term)).await.map_err(internal)?)
+            .map_err(internal)?,
+    };
     hits.truncate(10);
     Ok(Json(hits))
 }

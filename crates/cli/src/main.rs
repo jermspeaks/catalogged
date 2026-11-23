@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use catalogged_core::{tmdb, EditEntry, Entry, Kind, NewEntry, Source, Status, MAX_COVER_BYTES};
+use catalogged_core::{igdb, openlibrary, tmdb, Candidate, EditEntry, Entry, Kind, NewEntry, Source, Status, MAX_COVER_BYTES};
 use clap::{Parser, Subcommand};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
@@ -19,6 +19,12 @@ struct Cli {
     /// TMDB v4 read token or v3 key, for metadata and covers
     #[arg(long, env = "TMDB_API_KEY", global = true, hide_env_values = true)]
     tmdb_key: Option<String>,
+    /// IGDB (Twitch app) client id, for games
+    #[arg(long, env = "IGDB_CLIENT_ID", global = true, hide_env_values = true)]
+    igdb_id: Option<String>,
+    /// IGDB (Twitch app) client secret, for games
+    #[arg(long, env = "IGDB_CLIENT_SECRET", global = true, hide_env_values = true)]
+    igdb_secret: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -30,7 +36,7 @@ enum Cmd {
         /// game | book | show | movie
         #[arg(long)]
         kind: String,
-        /// Optional when --source tmdb --external-id is given (fetched from TMDB)
+        /// Optional when --external-id is given (fetched from the provider)
         #[arg(long)]
         title: Option<String>,
         /// wanted | in_progress | consumed
@@ -84,9 +90,9 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
-    /// Search TMDB for movies or shows and print their ids
+    /// Search the provider for this kind (TMDB, Open Library or IGDB) and print their ids
     Search {
-        /// movie | show
+        /// game | book | show | movie
         #[arg(long)]
         kind: String,
         query: String,
@@ -235,22 +241,38 @@ impl Client {
     }
 }
 
-/// Talks to TMDB directly (the key stays on this machine) and builds WebP covers.
-struct Tmdb {
+/// Talks to the metadata providers directly (keys stay on this machine) and builds WebP covers.
+/// Movies/shows: TMDB. Books: Open Library (no key). Games: IGDB (Twitch app token, fetched once).
+struct Meta {
     http: reqwest::blocking::Client,
-    key: String,
+    tmdb_key: Option<String>,
+    igdb: Option<(String, String)>,
+    igdb_token: std::cell::OnceCell<String>,
 }
 
-impl Tmdb {
-    fn new(key: Option<&String>) -> Result<Self> {
-        let key = key.cloned().context("set TMDB_API_KEY (or --tmdb-key)")?;
-        // TMDB can be slow; don't hang forever.
-        let http = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(30)).build()?;
-        Ok(Self { http, key })
+/// The provider an entry of this kind uses by default.
+fn default_source(kind: Kind) -> Source {
+    match kind {
+        Kind::Movie | Kind::Show => Source::Tmdb,
+        Kind::Book => Source::OpenLibrary,
+        Kind::Game => Source::Igdb,
+    }
+}
+
+impl Meta {
+    fn new(cli: &Cli) -> Result<Self> {
+        // Providers can be slow; don't hang forever. Open Library asks for an identifying User-Agent.
+        let http = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .user_agent("catalogged-personal-cli/0.1")
+            .build()?;
+        let igdb = cli.igdb_id.clone().zip(cli.igdb_secret.clone());
+        Ok(Self { http, tmdb_key: cli.tmdb_key.clone(), igdb, igdb_token: Default::default() })
     }
 
-    fn get(&self, url: String) -> Result<reqwest::blocking::Response> {
-        let (url, auth) = tmdb::authenticate(url, &self.key);
+    fn tmdb_get(&self, url: String) -> Result<String> {
+        let key = self.tmdb_key.as_ref().context("set TMDB_API_KEY (or --tmdb-key)")?;
+        let (url, auth) = tmdb::authenticate(url, key);
         let mut req = self.http.get(url);
         if let Some(a) = auth {
             req = req.header("Authorization", a);
@@ -259,29 +281,76 @@ impl Tmdb {
         if !res.status().is_success() {
             bail!("TMDB returned {}", res.status());
         }
-        Ok(res)
+        Ok(res.text()?)
     }
 
-    fn search(&self, kind: Kind, q: &str) -> Result<Vec<tmdb::Candidate>> {
-        let url = tmdb::search_url(kind, q).context("TMDB only supports movie and show")?;
-        Ok(tmdb::parse_search(&self.get(url)?.text()?)?)
+    fn get_text(&self, url: String, what: &str) -> Result<String> {
+        let res = self.http.get(url).send()?;
+        if !res.status().is_success() {
+            bail!("{what} returned {}", res.status());
+        }
+        Ok(res.text()?)
+    }
+
+    fn igdb_post(&self, body: String) -> Result<String> {
+        let (id, secret) = self.igdb.as_ref().context("set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET")?;
+        if self.igdb_token.get().is_none() {
+            let res = self.http.post(igdb::token_url(id, secret)).send()?;
+            if !res.status().is_success() {
+                bail!("Twitch token request returned {} (check the IGDB client id and secret)", res.status());
+            }
+            let _ = self.igdb_token.set(igdb::parse_token(&res.text()?)?);
+        }
+        let res = self
+            .http
+            .post(igdb::GAMES_URL)
+            .header("Client-ID", id)
+            .bearer_auth(self.igdb_token.get().map(String::as_str).unwrap_or_default())
+            .header("Accept", "application/json")
+            .body(body)
+            .send()?;
+        if !res.status().is_success() {
+            bail!("IGDB returned {}", res.status());
+        }
+        Ok(res.text()?)
+    }
+
+    fn search(&self, kind: Kind, q: &str) -> Result<Vec<Candidate>> {
+        Ok(match kind {
+            Kind::Movie | Kind::Show => {
+                tmdb::parse_search(&self.tmdb_get(tmdb::search_url(kind, q).context("unsupported kind")?)?)?
+            }
+            Kind::Book => openlibrary::parse_search(&self.get_text(openlibrary::search_url(q), "Open Library")?)?,
+            Kind::Game => igdb::parse_games(&self.igdb_post(igdb::search_body(q))?)?,
+        })
     }
 
     /// IMDb id -> (kind, TMDB record).
-    fn find(&self, imdb_id: &str) -> Result<(Kind, tmdb::Candidate)> {
-        tmdb::parse_find(&self.get(tmdb::find_url(imdb_id))?.text()?)?
+    fn find(&self, imdb_id: &str) -> Result<(Kind, Candidate)> {
+        tmdb::parse_find(&self.tmdb_get(tmdb::find_url(imdb_id))?)?
             .with_context(|| format!("TMDB has no movie or show for {imdb_id}"))
     }
 
-    fn details(&self, kind: Kind, id: &str) -> Result<tmdb::Candidate> {
-        let url = tmdb::details_url(kind, id).context("TMDB only supports movie and show")?;
-        Ok(tmdb::parse_details(&self.get(url)?.text()?)?)
+    fn details(&self, kind: Kind, id: &str) -> Result<Candidate> {
+        match kind {
+            Kind::Movie | Kind::Show => {
+                Ok(tmdb::parse_details(&self.tmdb_get(tmdb::details_url(kind, id).context("unsupported kind")?)?)?)
+            }
+            Kind::Book => Ok(openlibrary::parse_details(&self.get_text(openlibrary::details_url(id), "Open Library")?)?),
+            Kind::Game => {
+                let body = igdb::details_body(id).context("IGDB ids are numbers")?;
+                igdb::parse_games(&self.igdb_post(body)?)?
+                    .into_iter()
+                    .next()
+                    .with_context(|| format!("IGDB has no game {id}"))
+            }
+        }
     }
 
-    /// Downloads the poster and re-encodes it as a WebP under the free-tier size cap.
-    fn cover_webp(&self, poster_path: &str) -> Result<Vec<u8>> {
-        let bytes = self.http.get(tmdb::poster_url(poster_path)).send()?.error_for_status()?.bytes()?;
-        let img = image::load_from_memory(&bytes).context("decoding poster")?;
+    /// Downloads the cover and re-encodes it as a WebP under the free-tier size cap.
+    fn cover_webp(&self, url: &str) -> Result<Vec<u8>> {
+        let bytes = self.http.get(url).send()?.error_for_status()?.bytes()?;
+        let img = image::load_from_memory(&bytes).context("decoding cover")?;
         let enc = webp::Encoder::from_image(&img).map_err(|e| anyhow::anyhow!("webp: {e}"))?;
         for quality in [82.0, 70.0, 55.0, 40.0] {
             let out = enc.encode(quality).to_vec();
@@ -293,24 +362,27 @@ impl Tmdb {
     }
 }
 
-/// Fill in blanks from TMDB and return the poster path (if any) for the cover step.
-fn enrich(tmdb: &Tmdb, e: &mut NewEntry) -> Result<Option<String>> {
-    let (Some(Source::Tmdb), Some(id)) = (e.source, e.external_id.clone()) else {
+/// Fill in blanks from the provider and return the cover URL (if any) for the cover step.
+fn enrich(meta: &Meta, e: &mut NewEntry) -> Result<Option<String>> {
+    let (Some(source), Some(id)) = (e.source, e.external_id.clone()) else {
         if e.title.trim().is_empty() {
-            bail!("title is required unless --source tmdb with an --external-id is given");
+            bail!("title is required unless an --external-id is given");
         }
         return Ok(None);
     };
-    let found = tmdb.details(e.kind, &id)?;
+    if source != default_source(e.kind) {
+        bail!("source {source:?} cannot supply a {}; use {:?}", e.kind.as_str(), default_source(e.kind));
+    }
+    let found = meta.details(e.kind, &id)?;
     if e.title.trim().is_empty() {
         e.title = found.title;
     }
     e.year = e.year.or(found.year);
-    Ok(found.poster_path)
+    Ok(found.cover_url)
 }
 
 /// Turn a sheet row into a full entry, resolving IMDb ids through TMDB.
-fn resolve_row(tmdb: Option<&Tmdb>, row: Row) -> Result<NewEntry> {
+fn resolve_row(meta: &Meta, row: Row) -> Result<NewEntry> {
     let mut kind = row.kind;
     let mut source = row.source;
     let mut external_id = row.external_id.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
@@ -318,8 +390,7 @@ fn resolve_row(tmdb: Option<&Tmdb>, row: Row) -> Result<NewEntry> {
     let mut year = row.year;
     if let Some(id) = external_id.clone() {
         if tmdb::is_imdb_id(&id) {
-            let t = tmdb.context("IMDb ids need TMDB_API_KEY to resolve")?;
-            let (found_kind, c) = t.find(&id)?;
+            let (found_kind, c) = meta.find(&id)?;
             if kind.is_some_and(|k| k != found_kind) {
                 bail!("{id} is a {}, but the row says {}", found_kind.as_str(), kind.map(|k| k.as_str()).unwrap_or(""));
             }
@@ -331,12 +402,12 @@ fn resolve_row(tmdb: Option<&Tmdb>, row: Row) -> Result<NewEntry> {
             }
             year = year.or(c.year);
         } else if source.is_none() {
-            source = Some(Source::Tmdb);
+            source = kind.map(default_source);
         }
     }
     let kind = kind.context("kind is required unless external_id is an IMDb id (tt...)")?;
-    if let (true, Some(Source::Tmdb), Some(id), Some(t)) = (title.trim().is_empty(), source, &external_id, tmdb) {
-        let c = t.details(kind, id)?;
+    if let (true, Some(_), Some(id)) = (title.trim().is_empty(), source, &external_id) {
+        let c = meta.details(kind, id)?;
         title = c.title;
         year = year.or(c.year);
     }
@@ -357,21 +428,12 @@ fn resolve_row(tmdb: Option<&Tmdb>, row: Row) -> Result<NewEntry> {
 }
 
 /// Create the entry, then (best effort) upload its cover. A cover failure never loses the entry.
-fn add_one(client: &Client, tmdb: Option<&Tmdb>, mut e: NewEntry, covers: bool) -> Result<String> {
-    let poster = match (tmdb, e.source) {
-        (Some(t), Some(Source::Tmdb)) => enrich(t, &mut e)?,
-        _ => {
-            if e.title.trim().is_empty() {
-                bail!("title is required");
-            }
-            None
-        }
-    };
+fn add_one(client: &Client, meta: &Meta, mut e: NewEntry, covers: bool) -> Result<String> {
+    let cover = enrich(meta, &mut e)?;
     let slug = client.create(&e)?;
-    if let (true, Some(t), Some(p)) = (covers, tmdb, poster) {
-        match t.cover_webp(&p).and_then(|w| client.put_cover(e.kind, &slug, w)) {
-            Ok(()) => {}
-            Err(err) => eprintln!("warning: {} was added but its cover failed: {err:#}", e.title),
+    if let (true, Some(url)) = (covers, cover) {
+        if let Err(err) = meta.cover_webp(&url).and_then(|w| client.put_cover(e.kind, &slug, w)) {
+            eprintln!("warning: {} was added but its cover failed: {err:#}", e.title);
         }
     }
     Ok(e.title)
@@ -394,8 +456,11 @@ fn main() -> Result<()> {
                 external_id: external_id.clone(),
                 consumed_at: date.clone().or_else(|| today_if_consumed(status)),
             };
-            let tmdb = Tmdb::new(cli.tmdb_key.as_ref()).ok();
-            let title = add_one(&Client::new(&cli)?, tmdb.as_ref(), entry, !no_cover)?;
+            let mut entry = entry;
+            if entry.source.is_none() && entry.external_id.is_some() {
+                entry.source = Some(default_source(entry.kind));
+            }
+            let title = add_one(&Client::new(&cli)?, &Meta::new(&cli)?, entry, !no_cover)?;
             println!("added {title}");
         }
         Cmd::Edit { kind, slug, title, status, rating, review, date, year } => {
@@ -424,7 +489,7 @@ fn main() -> Result<()> {
         }
         Cmd::Search { kind, query } => {
             let kind = parse::<Kind>(kind)?;
-            for c in Tmdb::new(cli.tmdb_key.as_ref())?.search(kind, query)?.into_iter().take(10) {
+            for c in Meta::new(&cli)?.search(kind, query)?.into_iter().take(10) {
                 println!("{:>8}  {}{}", c.id, c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
             }
         }
@@ -436,13 +501,13 @@ fn main() -> Result<()> {
                 .map(|(i, r)| r.with_context(|| format!("row {}", i + 2)))
                 .collect::<Result<Vec<_>>>()?;
             println!("read {} rows", rows.len());
-            let tmdb = Tmdb::new(cli.tmdb_key.as_ref()).ok();
+            let meta = Meta::new(&cli)?;
             let client = if *dry_run { None } else { Some(Client::new(&cli)?) };
             let (mut added, mut skipped) = (0, 0);
             let mut failures: Vec<String> = vec![];
             for (i, row) in rows.into_iter().enumerate() {
                 let line = i + 2;
-                let entry = match resolve_row(tmdb.as_ref(), row).and_then(|e| e.validate().map_err(anyhow::Error::msg).map(|_| e)) {
+                let entry = match resolve_row(&meta, row).and_then(|e| e.validate().map_err(anyhow::Error::msg).map(|_| e)) {
                     Ok(e) => e,
                     Err(err) => {
                         eprintln!("FAIL  row {line}: {err:#}");
@@ -455,7 +520,7 @@ fn main() -> Result<()> {
                     println!("would add  {label}");
                     continue;
                 };
-                match add_one(client, tmdb.as_ref(), entry, !no_cover) {
+                match add_one(client, &meta, entry, !no_cover) {
                     Ok(title) => {
                         added += 1;
                         println!("ok    {title}");

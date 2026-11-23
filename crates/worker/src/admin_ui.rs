@@ -21,9 +21,9 @@ async function search(ev) {
   const ul = $('#results'); ul.replaceChildren();
   for (const c of items) {
     const li = document.createElement('li');
-    if (c.poster_path) {
+    if (c.thumb_url) {
       const img = document.createElement('img');
-      img.src = `https://image.tmdb.org/t/p/w92${c.poster_path}`; img.width = 46; img.alt = '';
+      img.src = c.thumb_url; img.width = 46; img.alt = '';
       li.append(img);
     }
     const label = document.createElement('span');
@@ -59,13 +59,13 @@ async function add(kind, c, btn) {
   const r = await fetch('/admin/api/entries', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ kind, title: c.title, status, year: c.year, source: 'tmdb', external_id: c.id, consumed_at }),
+    body: JSON.stringify({ kind, title: c.title, status, year: c.year, source: {movie:'tmdb',show:'tmdb',book:'open_library',game:'igdb'}[kind], external_id: c.id, consumed_at }),
   });
   if (!r.ok) { msg(`Add failed: ${r.status} ${(await r.text()).slice(0, 160)}`); btn.disabled = false; return; }
   const { slug } = await r.json();
-  if (c.poster_path) {
+  if (c.cover_url) {
     try {
-      const blob = await toWebp(`https://image.tmdb.org/t/p/w500${c.poster_path}`);
+      const blob = await toWebp(c.cover_url);
       const up = await fetch(`/admin/api/entries/${kind}/${slug}/cover`, { method: 'PUT', headers: { 'content-type': 'image/webp' }, body: blob });
       if (!up.ok) throw new Error(`cover upload ${up.status}`);
     } catch (e) { msg(`Added "${c.title}" but the cover failed: ${e.message}`); btn.textContent = 'Added (no cover)'; return; }
@@ -120,9 +120,9 @@ pub fn page(entries: &[Entry], page: u32, more: bool, q: &str) -> Markup {
             body {
                 h1 { "Add to catalogue" }
                 form #search {
-                    select #kind { option value="movie" { "Movie" } option value="show" { "TV show" } }
+                    select #kind { option value="movie" { "Movie" } option value="show" { "TV show" } option value="book" { "Book" } option value="game" { "Game" } }
                     " "
-                    input #q type="search" placeholder="Search TMDB…" required;
+                    input #q type="search" placeholder="Search by title…" required;
                     " status "
                     select #status {
                         option value="wanted" { "wanted" }

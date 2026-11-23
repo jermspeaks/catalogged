@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod igdb;
+pub mod openlibrary;
 pub mod tmdb;
 
 /// Max size of an uploaded WebP cover. Keeps R2 well inside the free tier (see docs/free-tier.md).
@@ -88,6 +90,18 @@ pub struct NewEntry {
     pub external_id: Option<String>,
     #[serde(default)]
     pub consumed_at: Option<String>,
+}
+
+/// A search hit or fetched item, normalized across providers. `cover_url` is a full-size image
+/// to convert to WebP; `thumb_url` is a small one for result lists.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Candidate {
+    pub id: String,
+    pub title: String,
+    pub year: Option<i32>,
+    pub cover_url: Option<String>,
+    pub thumb_url: Option<String>,
+    pub overview: Option<String>,
 }
 
 /// Payload for replacing an entry's editable fields. The slug never changes.

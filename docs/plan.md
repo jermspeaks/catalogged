@@ -69,15 +69,14 @@ Trade-offs, for the record:
 
 At personal-site traffic both are fine; the bucket domain mainly buys headroom against the Worker request cap and removes the 61x multiplier per page.
 
-### 4. Open Library provider (books)
-- `crates/core`: search and lookup URLs and parsing; ISBN as the external id (as erika.florist does).
-- CLI: `search --kind book`, `add --source open_library --external-id <isbn>`, CSV import; covers from Open Library (large size), converted to WebP. Use a long HTTP timeout (the service can hang).
-- Admin UI: book search alongside movie/show.
+### 4. Open Library provider (books): built
+- Entries use the Open Library **work** id (e.g. `OL20893680W`), stable across editions (changed from the ISBN idea: ISBN is per edition). Search, details and cover (large size, converted to WebP) work in the CLI (`search --kind book`, `add --kind book --external-id OL...`, CSV import) and in the admin search. No key; requests carry an identifying User-Agent. Work records often lack a publish year, so the year can be blank.
 
-### 5. IGDB provider (games)
-- **(you)** Obtain a Twitch client id and secret; store as Worker secrets and in `.env`.
-- Twitch OAuth client-credentials token handling: cache the token (Cache API) rather than fetching one per request, to stay inside the free subrequest limits.
-- Same CLI/admin integration as books; covers from the IGDB image CDN.
+### 5. IGDB provider (games): built
+- Twitch client-credentials token, then Apicalypse queries; cover from the IGDB image CDN (`t_cover_big`). Works in the CLI (`IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` in `.env`) and the admin search.
+- **(you)** For the admin search on production, set the two Worker secrets (`wrangler secret put IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET`) when you want game search in `/admin`; the CLI does not need them. I have not set any.
+- The Worker fetches a fresh token per admin search (2 subrequests, limit 50). Cache it only if searches become frequent.
+- IGDB data quirk: unreleased/TBD games can carry placeholder release years.
 
 ### 6. Admin gaps
 - Manual cover upload/replace for any entry (needed for anything without a provider cover).
