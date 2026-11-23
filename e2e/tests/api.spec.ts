@@ -64,3 +64,24 @@ test('public caching headers are set', async ({ request }) => {
   expect((await request.get('/favicon.svg')).status()).toBe(200);
   expect((await request.get('/manifest.webmanifest')).status()).toBe(200);
 });
+
+test('provider id: set, keep through the edit form, validate and reject duplicates', async ({ request }) => {
+  const a = await seed(request, { kind: 'movie', title: 'E2E Id A' });
+  const b = await seed(request, { kind: 'movie', title: 'E2E Id B' });
+  const put = (kind: string, slug: string, data: object) =>
+    request.put(`/admin/api/entries/${kind}/${slug}`, { data: { title: 'T', status: 'consumed', ...data } });
+
+  const ok = await put('movie', a, { source: 'tmdb', external_id: ' 603 ' });
+  expect(ok.status(), await ok.text()).toBe(200);
+  expect((await entry(request, 'movie', a)).body).toMatchObject({ source: 'tmdb', external_id: '603' });
+
+  expect((await put('movie', a, { source: 'tmdb' })).status()).toBe(400); // id missing
+  expect((await put('movie', a, { external_id: '603' })).status()).toBe(400); // source missing
+  expect((await put('movie', a, { source: 'tmdb', external_id: 'a b' })).status()).toBe(400);
+  expect((await put('movie', a, { source: 'open_library', external_id: 'OL1W' })).status()).toBe(400); // wrong provider for a movie
+  expect((await put('movie', b, { source: 'tmdb', external_id: '603' })).status()).toBe(409); // already used by A
+
+  const cleared = await put('movie', a, {});
+  expect(cleared.status()).toBe(200);
+  expect((await entry(request, 'movie', a)).body).toMatchObject({ source: null, external_id: null });
+});

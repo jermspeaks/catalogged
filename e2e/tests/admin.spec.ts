@@ -47,9 +47,12 @@ test('edit page: save fields, replace the cover, then delete through the dialog'
   await page.fill('input[name=year]', '2019');
   await page.fill('input[name=consumed_at]', '2024-05-06');
   await page.fill('textarea[name=review]', 'Worth it.');
+  await page.fill('input[name=external_id]', '12345');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('#msg')).toContainText('Saved');
-  expect((await entry(request, 'movie', slug)).body).toMatchObject({ status: 'consumed', rating: 8, year: 2019, consumed_at: '2024-05-06', review: 'Worth it.' });
+  expect((await entry(request, 'movie', slug)).body).toMatchObject({ status: 'consumed', rating: 8, year: 2019, consumed_at: '2024-05-06', review: 'Worth it.', source: 'tmdb', external_id: '12345' });
+  await page.reload();
+  await expect(page.locator('input[name=external_id]')).toHaveValue('12345'); // shown on the edit page
 
   // validation error surfaces instead of failing silently
   await page.fill('input[name=rating]', '99');

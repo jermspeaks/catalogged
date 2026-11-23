@@ -3,7 +3,7 @@
 //! free-tier CPU limit is ~10 ms.
 
 use crate::public_ui::{theme_picker, CSS, FAVICON_LINKS, THEME_INIT, THEME_JS};
-use catalogged_core::{Entry, MAX_COVER_BYTES};
+use catalogged_core::{Entry, Kind, MAX_COVER_BYTES};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 /// Shared browser helpers. `toWebp` takes an image URL or a File, scales to at most 500px wide
@@ -144,7 +144,8 @@ form.addEventListener('submit', async (ev) => {
   const r = await fetch(`/admin/api/entries/${kind}/${slug}`, {
     method: 'PUT', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ title: form.elements.title.value.trim(), status: form.elements.status.value,
-      rating: rating && Number(rating), year: year && Number(year), consumed_at: val('consumed_at'), review: val('review') }),
+      rating: rating && Number(rating), year: year && Number(year), consumed_at: val('consumed_at'), review: val('review'),
+      source: val('external_id') && SOURCE[kind], external_id: val('external_id') }),
   });
   msg(r.ok ? 'Saved ✓ (public pages refresh within ~5 min)' : `Failed: ${r.status} ${(await r.text()).slice(0, 120)}`);
 });
@@ -283,13 +284,20 @@ pub fn page(entries: &[Entry], page: u32, more: bool, q: &str) -> Markup {
     }, ADMIN_JS)
 }
 
+fn provider_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Movie | Kind::Show => "TMDB",
+        Kind::Book => "Open Library work",
+        Kind::Game => "IGDB",
+    }
+}
+
 pub fn edit_page(e: &Entry, cover_url: Option<String>) -> Markup {
     shell(&format!("Edit {}", e.title), html! {
         h1 { "Edit: " (e.title) }
         p.bar {
             a href={"/entry/" (e.kind.as_str()) "/" (e.slug)} { "View public page" }
             " · " (e.kind.as_str())
-            @if let Some(s) = &e.source { " · " (format!("{s:?}")) @if let Some(id) = &e.external_id { " " (id) } }
         }
         p #msg role="status" {}
         div #coverbox {
@@ -322,6 +330,7 @@ pub fn edit_page(e: &Entry, cover_url: Option<String>) -> Markup {
             }
             label { "Rating (1-10) " input name="rating" type="number" min="1" max="10" value=(e.rating.map(|r| r.to_string()).unwrap_or_default()); }
             label { "Year " input name="year" type="number" value=(e.year.map(|y| y.to_string()).unwrap_or_default()); }
+            label { (provider_name(e.kind)) " id " input name="external_id" value=(e.external_id.clone().unwrap_or_default()) placeholder="optional, e.g. a TMDB id" size="20"; }
             label { "Date logged " input name="consumed_at" type="date" value=(e.consumed_at.clone().unwrap_or_default()); }
             label { "Review " textarea name="review" rows="8" cols="60" { (e.review.clone().unwrap_or_default()) } }
             div.row {
