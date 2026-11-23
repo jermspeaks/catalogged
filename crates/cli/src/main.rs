@@ -11,10 +11,10 @@ struct Cli {
     #[arg(long, env = "CATALOGGED_URL", global = true)]
     url: Option<String>,
     /// Cloudflare Access service token (client id)
-    #[arg(long, env = "CF_ACCESS_CLIENT_ID", global = true, hide_env_values = true)]
+    #[arg(long, env = "CF_SERVICE_CLIENT_ID", global = true, hide_env_values = true)]
     access_id: Option<String>,
     /// Cloudflare Access service token (client secret)
-    #[arg(long, env = "CF_ACCESS_CLIENT_SECRET", global = true, hide_env_values = true)]
+    #[arg(long, env = "CF_SERVICE_CLIENT_SECRET", global = true, hide_env_values = true)]
     access_secret: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
@@ -73,7 +73,8 @@ impl Client {
             headers.insert("CF-Access-Client-Id", id.parse()?);
             headers.insert("CF-Access-Client-Secret", secret.parse()?);
         }
-        Ok(Self { http: reqwest::blocking::Client::new(), url: url.trim_end_matches('/').into(), headers })
+        Ok(Self { // Never follow redirects: an Access login redirect would otherwise look like success.
+            http: reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build()?, url: url.trim_end_matches('/').into(), headers })
     }
 
     fn create(&self, e: &NewEntry) -> Result<()> {
@@ -83,6 +84,9 @@ impl Client {
             .headers(self.headers.clone())
             .json(e)
             .send()?;
+        if res.status().is_redirection() {
+            bail!("{} redirect: Cloudflare Access rejected the credentials (check the service token and policy)", res.status());
+        }
         if !res.status().is_success() {
             bail!("{}: {}", res.status(), res.text().unwrap_or_default());
         }
@@ -91,6 +95,7 @@ impl Client {
 }
 
 fn main() -> Result<()> {
+    let _ = dotenvy::dotenv();
     let cli = Cli::parse();
     match &cli.cmd {
         Cmd::Add { kind, title, status, rating, year, notes, source, external_id } => {

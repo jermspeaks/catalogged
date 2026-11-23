@@ -48,7 +48,7 @@ Then protect `/admin/*` with a Cloudflare Access application, and create a servi
 
 ```sh
 export CATALOGGED_URL=https://<your-worker>.workers.dev
-export CF_ACCESS_CLIENT_ID=...  CF_ACCESS_CLIENT_SECRET=...
+export CF_SERVICE_CLIENT_ID=...  CF_SERVICE_CLIENT_SECRET=...
 
 cargo run -p catalogged-cli -- add --kind movie --title "10 Things I Hate About You" \
   --status wanted --source tmdb --external-id 4951
