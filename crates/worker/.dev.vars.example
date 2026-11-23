@@ -4,3 +4,5 @@ IGDB_CLIENT_ID=
 IGDB_CLIENT_SECRET=
 # Local dev: serve covers from the Worker instead of the production bucket domain
 COVERS_BASE_URL=
+# Local dev only: skip Access JWT verification (production must configure ACCESS_TEAM_DOMAIN and ACCESS_AUD)
+ACCESS_JWT_OPTIONAL=1

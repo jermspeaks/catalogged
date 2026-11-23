@@ -223,6 +223,7 @@ dependencies = [
 name = "catalogged-core"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "serde",
  "serde_json",
  "thiserror",
@@ -237,10 +238,14 @@ dependencies = [
  "catalogged-core",
  "console_error_panic_hook",
  "http",
+ "js-sys",
  "maud",
  "serde",
  "serde_json",
  "tower-service",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "worker",
 ]
 

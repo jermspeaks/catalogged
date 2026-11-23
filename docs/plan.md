@@ -91,10 +91,11 @@ At personal-site traffic both are fine; the bucket domain mainly buys headroom a
 ### E2E tests: built
 - `e2e/` (Playwright, 20 tests). See README. Not covered: real providers (mocked on purpose), Cloudflare Access, the production cache layer, and CI (none yet; run `npm test` before merging Worker or UI changes).
 
-### 8. Hardening and operations
-- Verify the Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`) inside the Worker as defense in depth, so a misconfigured Access app cannot expose `/admin`.
-- A repeatable D1 backup (`wrangler d1 export`) on a schedule or by hand; know how to use D1 Time Travel.
-- Revisit `docs/free-tier.md` numbers against real usage after the first couple of weeks (D1 row metrics, R2 operations).
+### 8. Hardening and operations: built (needs your two values)
+- Access JWT verified inside the Worker for all `/admin` routes (fails closed; e2e-tested with a fake issuer: missing, expired, wrong audience/issuer, wrong key, tampered, `alg: none`).
+- **(you)** `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` in `wrangler.toml` (see [operations.md](operations.md)); until set, `/admin` answers 503 once this is deployed. Do not deploy before they are filled in.
+- Backups: `scripts/backup.sh` (D1 SQL export + manual covers; verified to restore into a fresh database), Time Travel documented (7 days on Free).
+- Free-tier monitoring checklist in operations.md. Real usage numbers have not been reviewed yet (needs a couple of weeks of traffic and the seed import).
 
 ## Open questions
 
