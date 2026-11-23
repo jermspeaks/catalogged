@@ -83,6 +83,11 @@ At personal-site traffic both are fine; the bucket domain mainly buys headroom a
 - Covers now use content-hashed keys (`kind/slug-<hash>.webp`) with an immutable one-year cache; replacing a cover writes a new key and deletes the old object, so stale images are impossible. Older unhashed keys keep working until replaced.
 - Still optional: purge cached public pages after an edit or delete (they refresh within 5 minutes).
 
+### 6b. Matching and cover search: built
+- `catalogged match in.csv out.csv` fills provider ids for id-less rows (see README). Pure picking logic is in `crates/core/src/matching.rs` (exact normalised title; year within 1 separates remakes; otherwise `check`). Not done: fuzzy matching for misspelt titles; those rows come back `none` with candidates to choose from.
+- Edit page: search a provider for a cover, or paste an image link. `GET /admin/api/image?url=` relays the remote image (https, public hostname, image/* only, 10 MB cap; one subrequest and no decoding, so no CPU cost). The browser converts to WebP as before.
+- Still open (in discovery.md): a placeholder image for entries without a cover, and a bulk cover finder for existing entries with no cover.
+
 ### 7. Public site: grid, filter, sort, search
 - Built (first cut): `/index.json` (one compact JSON array per entry, assembled by SQLite so the Worker does not decode rows; cached 15 min, so a cache miss reads the table once, about 5k rows at the limit). A small script on `/` loads it once and does search, kind/status filter and sort (recent, date logged, title, year, rating) in the browser, with "Show more" in batches of 60 and the state kept in the URL. The server-rendered first page and kind links remain as the no-JS fallback. Zero D1 reads per interaction.
 - Built: palette from discovery.md, dark mode following the system, with a Theme picker (system / light / dark) saved in `localStorage`.

@@ -14,11 +14,22 @@ const MAX = __MAX__;
 const msg = (t) => ($('#msg').textContent = t);
 const SOURCE = { movie: 'tmdb', show: 'tmdb', book: 'open_library', game: 'igdb' };
 
-async function toWebp(src) {
+async function loadImage(src) {
   const img = new Image();
   if (typeof src === 'string') { img.crossOrigin = 'anonymous'; img.src = src; }
   else img.src = URL.createObjectURL(src);
   await img.decode();
+  return img;
+}
+
+async function toWebp(src) {
+  let img;
+  try { img = await loadImage(src); }
+  catch (e) {
+    // Most hosts send no CORS headers, so the canvas can't read them: relay through the Worker.
+    if (typeof src !== 'string') throw e;
+    img = await loadImage(`/admin/api/image?url=${encodeURIComponent(src)}`);
+  }
   const scale = Math.min(1, 500 / img.naturalWidth);
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(img.naturalWidth * scale); canvas.height = Math.round(img.naturalHeight * scale);
@@ -138,15 +149,39 @@ form.addEventListener('submit', async (ev) => {
   msg(r.ok ? 'Saved ✓ (public pages refresh within ~5 min)' : `Failed: ${r.status} ${(await r.text()).slice(0, 120)}`);
 });
 
-$('#coverfile').addEventListener('change', async (ev) => {
-  const file = ev.target.files[0]; if (!file) return;
+async function setCover(src) {
   msg('Converting and uploading…');
   try {
-    const { url } = await putCover(kind, slug, file);
+    const { url } = await putCover(kind, slug, src);
     let img = $('#coverimg');
     if (!img) { img = document.createElement('img'); img.id = 'coverimg'; img.className = 'cover'; img.alt = ''; $('#coverbox').prepend(img); }
     img.src = url; msg('Cover updated ✓');
   } catch (e) { msg(`Cover failed: ${e.message}`); }
+}
+
+$('#coverfile').addEventListener('change', (ev) => { const file = ev.target.files[0]; if (file) setCover(file); });
+
+// Cover from a link (the Worker relays the image because most hosts block direct reads).
+$('#coverlink').addEventListener('submit', (ev) => { ev.preventDefault(); setCover($('#coverurl').value.trim()); });
+
+// Cover from a provider search (same sources as adding an entry).
+$('#coversearch').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const q = $('#coverq').value.trim(); if (!q) return;
+  msg('Searching…');
+  const r = await fetch(`/admin/api/search?kind=${kind}&q=${encodeURIComponent(q)}`);
+  if (!r.ok) { msg(`Search failed: ${r.status} ${(await r.text()).slice(0, 120)}`); return; }
+  const items = (await r.json()).filter((c) => c.cover_url);
+  msg(items.length ? '' : 'No results with a cover.');
+  const ul = $('#coverresults'); ul.replaceChildren();
+  for (const c of items) {
+    const li = document.createElement('li');
+    if (c.thumb_url) { const im = document.createElement('img'); im.src = c.thumb_url; im.width = 46; im.alt = ''; li.append(im); }
+    const label = document.createElement('span'); label.textContent = ` ${c.title}${c.year ? ` (${c.year})` : ''} `;
+    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = 'Use this cover';
+    btn.onclick = () => setCover(c.cover_url);
+    li.append(label, btn); ul.append(li);
+  }
 });
 
 const dlg = $('#confirm');
@@ -260,6 +295,21 @@ pub fn edit_page(e: &Entry, cover_url: Option<String>) -> Markup {
         div #coverbox {
             @if let Some(u) = &cover_url { img #coverimg.cover src=(u) alt=""; }
             label { "Upload or replace cover " input #coverfile type="file" accept="image/*"; }
+            details {
+                summary { "Find a cover (search " (e.kind.as_str()) " sources)" }
+                form #coversearch.row {
+                    input #coverq type="search" value=(e.title) required;
+                    button type="submit" { "Search" }
+                }
+                ul #coverresults.plain {}
+            }
+            details {
+                summary { "Use a link to an image" }
+                form #coverlink.row {
+                    input #coverurl type="url" placeholder="https://…/poster.jpg" size="48" required;
+                    button type="submit" { "Use link" }
+                }
+            }
         }
         form #edit data-kind=(e.kind.as_str()) data-slug=(e.slug) {
             label { "Title " input name="title" value=(e.title) required; }

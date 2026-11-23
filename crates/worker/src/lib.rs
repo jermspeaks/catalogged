@@ -10,7 +10,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use catalogged_core::{igdb, openlibrary, slugify, tmdb, EditEntry, Entry, Kind, NewEntry, MAX_COVER_BYTES};
+use catalogged_core::{igdb, imageurl, openlibrary, slugify, tmdb, EditEntry, Entry, Kind, NewEntry, MAX_COVER_BYTES};
 use maud::{html, Markup, DOCTYPE};
 use serde::Deserialize;
 use tower_service::Service;
@@ -59,6 +59,7 @@ fn router(env: Env) -> Router {
         .route("/admin/edit/{kind}/{slug}", get(admin_edit_page))
         .route("/admin/api/search", get(search))
         .route("/admin/api/lookup", get(lookup))
+        .route("/admin/api/image", get(proxy_image))
         .route("/admin/api/entries", post(create_entry))
         .route(
             "/admin/api/entries/{kind}/{slug}",
@@ -598,6 +599,41 @@ async fn create_entry(
     // A UNIQUE violation (duplicate slug / external id) surfaces here.
     .map_err(|e| (StatusCode::CONFLICT, e.to_string()))?;
     Ok(Json(serde_json::json!({ "slug": slug })))
+}
+
+#[derive(Deserialize)]
+struct ImageQuery {
+    url: String,
+}
+
+/// Fetches a remote image for the browser to convert to WebP (remote hosts rarely send CORS headers,
+/// so the browser cannot read them directly). The Worker only relays bytes, never decodes: one
+/// subrequest, bounded at 10 MB, image/* only (no SVG).
+#[worker::send]
+async fn proxy_image(State(state): State<AppState>, Query(q): Query<ImageQuery>) -> Result<AxumResponse, ApiErr> {
+    admin_guard(&state.env)?;
+    imageurl::check(&q.url).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let headers = Headers::new();
+    headers.set("User-Agent", "catalogged-personal/0.1").map_err(internal)?;
+    headers.set("Accept", "image/*").map_err(internal)?;
+    let mut init = RequestInit::new();
+    init.with_headers(headers);
+    let mut res = Fetch::Request(Request::new_with_init(&q.url, &init).map_err(internal)?)
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("could not fetch the link: {e}")))?;
+    if res.status_code() != 200 {
+        return Err((StatusCode::BAD_GATEWAY, format!("the link returned {}", res.status_code())));
+    }
+    let ctype = res.headers().get("content-type").ok().flatten().unwrap_or_default().to_ascii_lowercase();
+    if !ctype.starts_with("image/") || ctype.starts_with("image/svg") {
+        return Err((StatusCode::UNSUPPORTED_MEDIA_TYPE, "the link is not a raster image".into()));
+    }
+    let bytes = res.bytes().await.map_err(internal)?;
+    if bytes.len() > imageurl::MAX_REMOTE_IMAGE_BYTES {
+        return Err((StatusCode::PAYLOAD_TOO_LARGE, "image is larger than 10 MB".into()));
+    }
+    Ok(([(header::CONTENT_TYPE, ctype), (header::CACHE_CONTROL, "no-store".to_string())], bytes).into_response())
 }
 
 fn is_webp(b: &[u8]) -> bool {

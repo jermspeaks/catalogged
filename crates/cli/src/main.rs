@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use catalogged_core::{igdb, openlibrary, tmdb, Candidate, EditEntry, Entry, Kind, NewEntry, Source, Status, MAX_COVER_BYTES};
+use catalogged_core::{igdb, matching, openlibrary, tmdb, Candidate, EditEntry, Entry, Kind, NewEntry, Source, Status, MAX_COVER_BYTES};
 use clap::{Parser, Subcommand};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
@@ -113,6 +113,11 @@ enum Cmd {
         #[arg(long)]
         no_cover: bool,
     },
+    /// Find provider ids for rows that have none: searches TMDB / Open Library / IGDB by title (and
+    /// author for books) and writes a new CSV with source, external_id and year filled in, plus
+    /// match (high | check | none), match_title and candidates columns to review before `import`.
+    /// Rows that already have an external_id pass through unchanged. Nothing is sent to the Worker.
+    Match { input: PathBuf, output: PathBuf },
 }
 
 fn today_if_consumed(status: Status) -> Option<String> {
@@ -439,6 +444,75 @@ fn add_one(client: &Client, meta: &Meta, mut e: NewEntry, covers: bool) -> Resul
     Ok(e.title)
 }
 
+/// Search each id-less row and write the review CSV (see `Cmd::Match`).
+fn match_csv(meta: &Meta, input: &PathBuf, output: &PathBuf) -> Result<()> {
+    let mut rdr = csv::Reader::from_path(input)?;
+    let mut headers: Vec<String> = rdr.headers()?.iter().map(str::to_owned).collect();
+    let mut col = |name: &str| -> usize {
+        headers.iter().position(|h| h == name).unwrap_or_else(|| {
+            headers.push(name.to_owned());
+            headers.len() - 1
+        })
+    };
+    let (i_kind, i_title, i_year) = (col("kind"), col("title"), col("year"));
+    let (i_src, i_id, i_author) = (col("source"), col("external_id"), col("author"));
+    let (i_match, i_mtitle, i_cands) = (col("match"), col("match_title"), col("candidates"));
+    let mut wtr = csv::Writer::from_path(output)?;
+    wtr.write_record(&headers)?;
+    let (mut high, mut check, mut none, mut errors, mut skipped) = (0, 0, 0, 0, 0);
+    for (n, rec) in rdr.records().enumerate() {
+        let mut f: Vec<String> = rec?.iter().map(str::to_owned).collect();
+        f.resize(headers.len(), String::new());
+        let kind = parse::<Kind>(&f[i_kind]).ok();
+        let Some(kind) = kind.filter(|_| f[i_id].trim().is_empty() && !f[i_title].trim().is_empty()) else {
+            skipped += 1;
+            wtr.write_record(&f)?;
+            continue;
+        };
+        let year = f[i_year].trim().parse::<i32>().ok();
+        let query = if kind == Kind::Book && !f[i_author].trim().is_empty() {
+            format!("{} {}", f[i_title], f[i_author])
+        } else {
+            f[i_title].clone()
+        };
+        match meta.search(kind, &query) {
+            Ok(found) => {
+                let (pick, conf) = matching::pick(&f[i_title], year, &found);
+                f[i_match] = conf.as_str().to_owned();
+                if let Some(c) = pick.map(|i| &found[i]) {
+                    f[i_src] = default_source(kind).as_str().to_owned();
+                    f[i_id] = c.id.clone();
+                    f[i_mtitle] = format!("{}{}", c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
+                    if f[i_year].trim().is_empty() {
+                        f[i_year] = c.year.map(|y| y.to_string()).unwrap_or_default();
+                    }
+                }
+                f[i_cands] = found
+                    .iter()
+                    .take(3)
+                    .map(|c| format!("{}: {}{}", c.id, c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default()))
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                match conf {
+                    matching::Confidence::High => high += 1,
+                    matching::Confidence::Check => check += 1,
+                    matching::Confidence::None => none += 1,
+                }
+            }
+            Err(err) => {
+                eprintln!("FAIL  row {}: {err:#}", n + 2);
+                f[i_match] = "error".into();
+                errors += 1;
+            }
+        }
+        wtr.write_record(&f)?;
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    wtr.flush()?;
+    println!("matched: {high} high, {check} to check, {none} none, {errors} errors, {skipped} left as they were -> {}", output.display());
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
@@ -493,6 +567,7 @@ fn main() -> Result<()> {
                 println!("{:>8}  {}{}", c.id, c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
             }
         }
+        Cmd::Match { input, output } => match_csv(&Meta::new(&cli)?, input, output)?,
         Cmd::Import { file, dry_run, skip_existing, no_cover } => {
             let mut rdr = csv::Reader::from_path(file)?;
             let rows = rdr
