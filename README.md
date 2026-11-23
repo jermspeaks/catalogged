@@ -59,13 +59,15 @@ Copy `.env.example` to `.env` (gitignored) and fill it in: `CATALOGGED_URL`, the
 ```sh
 cargo run -p catalogged-cli -- search --kind movie "10 things i hate about you"   # find a TMDB id
 cargo run -p catalogged-cli -- add --kind movie --source tmdb --external-id 4951  # title, year, cover fetched from TMDB
-cargo run -p catalogged-cli -- add --kind movie --title "Some Film" --status consumed --rating 8   # manual entry
+cargo run -p catalogged-cli -- add --kind movie --title "Some Film" --status consumed --rating 8 --review "Loved it" --date 2026-11-20   # manual entry
+cargo run -p catalogged-cli -- edit --kind movie --slug some-film --rating 9 --review "Better on rewatch"          # only passed flags change
+cargo run -p catalogged-cli -- delete --kind movie --slug some-film --yes                                          # also removes the cover
 cargo run -p catalogged-cli -- import entries.csv --dry-run
 cargo run -p catalogged-cli -- import entries.csv                                 # --no-cover to skip covers
 ```
 
-CSV columns: `kind,title,status,rating,notes,year,source,external_id`. For `source=tmdb` rows, `title` and `year` may be left blank and are filled from TMDB. Covers are downloaded from TMDB, converted to WebP (<= 300 KB), and uploaded to R2. A cover failure never loses the entry.
+CSV columns: `kind,title,status,rating,review,year,source,external_id,consumed_at` (`notes` is accepted as an alias for `review`). A `consumed` entry with no date is logged as today. For `source=tmdb` rows, `title` and `year` may be left blank and are filled from TMDB. Covers are downloaded from TMDB, converted to WebP (<= 300 KB), and uploaded to R2. A cover failure never loses the entry.
 
 ## Admin UI
 
-`/admin` (behind Cloudflare Access): search TMDB, pick a result, choose a status, and Add. The browser converts the poster to WebP with a canvas and uploads it. Games and books come from the CLI until their providers exist.
+`/admin` (behind Cloudflare Access): search TMDB, pick a result, choose a status (and optionally a date; consumed defaults to today), and Add. Every entry in the list below has an edit form (title, status, rating, year, date logged, review) and a Delete button; the list is paginated and filterable by title. The browser converts the poster to WebP with a canvas and uploads it. Games and books come from the CLI until their providers exist.

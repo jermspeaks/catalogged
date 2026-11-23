@@ -21,7 +21,7 @@ See [free-tier.md](free-tier.md) for the budget and guard rules.
 
 ### Write path
 
-Entries: `POST /admin/api/entries`. Covers: `PUT /admin/api/entries/{kind}/{slug}/cover` (WebP only, <= `MAX_COVER_BYTES`, enforced server-side). Covers are served publicly from `GET /covers/{kind}/{slug}.webp`.
+Entries: `POST /admin/api/entries`; `GET`/`PUT`/`DELETE /admin/api/entries/{kind}/{slug}` (PUT replaces title, status, rating, review, year, `consumed_at`; the slug never changes; DELETE also removes the R2 cover). Covers: `PUT /admin/api/entries/{kind}/{slug}/cover` (WebP only, <= `MAX_COVER_BYTES`, enforced server-side). Covers are served publicly from `GET /covers/{kind}/{slug}.webp`.
 
 Both the admin UI and the CLI write through `POST /admin/api/entries` (`NewEntry` JSON), so validation and slug generation live in one place. Duplicates return 409.
 
@@ -45,7 +45,7 @@ That site keeps markdown files per entry and regenerates data and covers with a 
 4. **Admin UI** (first version done): TMDB search, add, browser-side WebP cover upload. Still to do: edit/delete, game/book search.
 5. **Covers** (done): CLI downloads, converts (`image` + `webp`), uploads; Worker validates and stores in R2.
 6. **Public site:** edge caching is done (Cache API, 5 min TTL; covers 24 h). Still to do: per-kind pages, status filters, entry detail.
-7. **Edit/delete** entries; ratings and consumed dates.
+7. **Edit/delete, reviews, dates** (done): edit/delete in the admin UI and CLI; `review` text and `consumed_at` (date logged) on every entry; public detail page `/entry/{kind}/{slug}`; paginated public list (60/page) with a kind filter.
 
 ## Open questions
 

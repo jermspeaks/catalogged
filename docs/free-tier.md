@@ -26,6 +26,13 @@ R2 is the only place a bill can appear, so it gets explicit guards. Workers and 
 5. Bulk imports (CLI) write one row per entry: 100k/day is ample, but do not loop retries on failures.
 6. Serve covers through the Worker with long `Cache-Control` / Cache API, so repeat views are not R2 Class B reads.
 
+## Sizing for ~5,000 entries
+
+- **D1 storage:** a few MB. R2: ~45 KB per WebP cover, so ~225 MB for 5k covers (2% of the 10 GB).
+- **D1 reads:** lists use `ORDER BY updated_at` with indexes (migration 0002) and `LIMIT 61`, so a page reads ~61 rows. `OFFSET` still scans skipped rows, so the deepest page reads up to ~5k; pages are capped (`MAX_PAGE`) and cached.
+- **Cache key:** only `kind` and `page` vary the cache key, so random `?x=` params cannot bypass the cache and burn reads.
+- **Admin:** the list and the title filter (`LIKE`, a table scan) are uncached; fine for one user, but do not script them in a loop.
+
 ## Alerts (manual, in the dashboard)
 
 - Billing > Notifications: set a usage-based billing alert on R2 and a budget threshold at a very low amount (e.g. $1), so any overage is noticed immediately.
