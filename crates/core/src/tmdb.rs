@@ -30,6 +30,33 @@ pub fn details_url(kind: Kind, id: &str) -> Option<String> {
     Some(format!("{API}/{}/{}", path_kind(kind)?, urlencoding::encode(id)))
 }
 
+/// Looks up a TMDB record by IMDb id (`tt1234567`). Returns movie and tv matches.
+pub fn find_url(imdb_id: &str) -> String {
+    format!("{API}/find/{}?external_source=imdb_id", urlencoding::encode(imdb_id))
+}
+
+pub fn is_imdb_id(s: &str) -> bool {
+    s.len() > 2 && s.starts_with("tt") && s[2..].bytes().all(|b| b.is_ascii_digit())
+}
+
+#[derive(Deserialize)]
+struct Found {
+    #[serde(default)]
+    movie_results: Vec<Raw>,
+    #[serde(default)]
+    tv_results: Vec<Raw>,
+}
+
+/// First match from a `/find` response, with its kind. Movies win if both lists have one.
+pub fn parse_find(json: &str) -> Result<Option<(Kind, Candidate)>, serde_json::Error> {
+    let f: Found = serde_json::from_str(json)?;
+    Ok(f.movie_results
+        .into_iter()
+        .next()
+        .map(|r| (Kind::Movie, r.into()))
+        .or_else(|| f.tv_results.into_iter().next().map(|r| (Kind::Show, r.into()))))
+}
+
 pub fn poster_url(poster_path: &str) -> String {
     format!("{IMAGE}/{POSTER_SIZE}{poster_path}")
 }
@@ -102,6 +129,14 @@ mod tests {
         assert_eq!((m.id.as_str(), m.year, m.overview), ("4951", Some(1999), None));
         let s = parse_search(r#"{"results":[{"id":1,"name":"Show","first_air_date":"","poster_path":null}]}"#).unwrap();
         assert_eq!((s[0].title.as_str(), s[0].year, s[0].poster_path.clone()), ("Show", None, None));
+    }
+
+    #[test]
+    fn find_by_imdb_id() {
+        assert!(is_imdb_id("tt0133093") && !is_imdb_id("603") && !is_imdb_id("tt"));
+        let (k, c) = parse_find(r#"{"movie_results":[],"tv_results":[{"id":1396,"name":"Breaking Bad","first_air_date":"2008-01-20"}]}"#).unwrap().unwrap();
+        assert_eq!((k, c.id.as_str(), c.year), (Kind::Show, "1396", Some(2008)));
+        assert!(parse_find(r#"{"movie_results":[],"tv_results":[]}"#).unwrap().is_none());
     }
 
     #[test]

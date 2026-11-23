@@ -30,6 +30,16 @@ type ApiErr = (StatusCode, String);
 const PUBLIC_CACHE: &str = "public, max-age=300";
 const COVER_CACHE: &str = "public, max-age=86400";
 
+/// Where a cover is fetched from. With `COVERS_BASE_URL` set (the public R2 domain) images skip the
+/// Worker entirely, so they do not count against the 100k/day Worker request cap. Otherwise the
+/// Worker serves them from `/covers/...` (local dev, or before the domain exists).
+fn cover_src(env: &Env, key: &str) -> String {
+    match env.var("COVERS_BASE_URL").map(|v| v.to_string()).ok().filter(|b| !b.is_empty()) {
+        Some(base) => format!("{}/{key}", base.trim_end_matches('/')),
+        None => format!("/covers/{key}"),
+    }
+}
+
 fn router(env: Env) -> Router {
     Router::new()
         .route("/", get(home))
@@ -197,7 +207,7 @@ async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Axu
                 @for e in &entries {
                     li {
                         a href={"/entry/" (e.kind.as_str()) "/" (e.slug)} {
-                            @if let Some(key) = &e.cover_key { img src={"/covers/" (key)} alt="" loading="lazy" width="300" height="450"; }
+                            @if let Some(key) = &e.cover_key { img src=(cover_src(&state.env, key)) alt="" loading="lazy" width="300" height="450"; }
                             div { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
                         }
                         small { (e.kind.as_str()) " · " (e.status.as_str()) @if let Some(r) = e.rating { " · " (r) "/10" } }
@@ -216,6 +226,7 @@ async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Axu
 
 #[worker::send]
 async fn entry_page(State(state): State<AppState>, Path((kind, slug)): Path<(String, String)>) -> AxumResponse {
+    let e_env = state.env.clone();
     let e = match find_entry(&state.env, &kind, &slug).await {
         Ok(Some(e)) => e,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
@@ -226,7 +237,7 @@ async fn entry_page(State(state): State<AppState>, Path((kind, slug)): Path<(Str
         html! {
             p { a href="/" { "← all" } }
             h1 { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
-            @if let Some(key) = &e.cover_key { img src={"/covers/" (key)} alt="" width="300" height="450"; }
+            @if let Some(key) = &e.cover_key { img src=(cover_src(&e_env, key)) alt="" width="300" height="450"; }
             p {
                 (e.kind.as_str()) " · " (e.status.as_str())
                 @if let Some(r) = e.rating { " · " (r) "/10" }
