@@ -36,7 +36,7 @@ Ordered by value for the owner's actual goal (a complete, good-looking catalogue
 The 2010 sheet is in; 2011 to 2026 are not. The owner's log lives in `~/projects/jermspeaks.github.io/src/content/log/` (one markdown file per year, with books, movies, some games and shows; later years carry TMDB links and Letterboxd links).
 - Generator: `scripts/log2csv.py <log.md> <year> <out.csv>` (in the repo; sheets go to `seeds/`, which is gitignored because they are personal data). It reads the 2010 and 2011 formats and understands TMDB links, Letterboxd links, `🔁`, `🎮` and `📺` lines; later years (2013 onwards) have not been run through it yet, so check each year's output before matching. Books get a `creator` column from the `by Author` text.
 - Per year: generate, `match --interactive` (sure matches are filled in without asking), `import --dry-run`, 10 rows for real, then the rest with `--skip-existing`; `scripts/backup.sh` first. Mind the D1 write budget: 5,000 entries is about half of one day's writes; import a year or two per run.
-- Status: 2010 imported. 2011 generated (124 rows: 86 movies, 38 books) and matched: 66 sure, 48 to check, 10 with no match. Next: `match -i`, then import, after the creator migration and Worker deploy. Then 2012 and on.
+- Status: creator migration applied and Worker deployed (2026-11-23); creators backfilled for the 2010 entries (76 of 79 have one). 2010 imported. 2011 generated (124 rows: 86 movies, 38 books) and matched: 66 sure, 48 to check, 10 with no match. Next: `match -i`, then import, after the creator migration and Worker deploy. Then 2012 and on.
 
 ### P2. Identify (M)
 New idea from the owner (2026-11-23): replace the cover finder with an **identify** action that grabs all metadata from the provider and the cover, including the title.
@@ -59,7 +59,7 @@ Per-kind and per-status counts; richer detail pages (year, source link, provider
 ### P7. Housekeeping (S each)
 - GitHub Action running the e2e suite on pull requests (none exists; run `npm test` in `e2e/` before merging Worker or UI changes today).
 - PNG and apple-touch icons (the favicon and manifest use an SVG only).
-- Test the manual-cover path of `scripts/backup.sh` once a manually uploaded cover exists.
+- Validate provider ids on write: an Open Library id must look like `OL…W` (a work). One entry was saved with an edition id (`OL22376472M`, "Naked"), which no lookup accepts; its work is `OL2693083W`. Fix that entry by hand on its edit page.
 - Admin game search in production needs the two IGDB Worker secrets (`wrangler secret put IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET`); owner action, only if game search in `/admin` is wanted.
 - Review real free-tier numbers after a few weeks of traffic.
 

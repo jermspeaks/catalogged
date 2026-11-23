@@ -8,9 +8,9 @@ _Last reviewed: 2026-11-23, after PR #16._
 
 | Area | State |
 |---|---|
-| Code on `main` | Everything below, through PR #18 (the creator work is in the next PR) |
-| Production | Deployed from `main` (PR #16) at https://catalog.05152024.xyz; `workers.dev` and preview URLs are off. All migrations applied |
-| Data | The 2010 log is imported (75 entries); 79 entries in total, about 44 with covers and 42 with a provider id. Later years not yet imported |
+| Code on `main` | Everything below, through PR #19 (creator field and matching) |
+| Production | Deployed from `main` (PR #19) at https://catalog.05152024.xyz; `workers.dev` and preview URLs are off. All migrations applied, through `0003` |
+| Data | 79 entries: the 2010 log is imported (75) plus a few added by hand; all have covers, 77 have a provider id and 76 a creator. Later years not yet imported |
 | Infrastructure | D1 `catalogged`, R2 `catalogged-covers`, Worker `catalogged`, Access in front of `/admin`, billing alert set, Workers Free plan |
 
 ## Infrastructure and security
@@ -93,5 +93,5 @@ _Last reviewed: 2026-11-23, after PR #16._
 ## Known gaps in what is "done"
 
 - The admin JavaScript is covered by e2e tests with providers mocked; real provider responses in the browser (TMDB / Open Library / IGDB search from `/admin`) have only been exercised by the owner.
-- The manual-cover backup path in `scripts/backup.sh` is untested (no manually uploaded covers existed when it was written).
+- The manual-cover backup path in `scripts/backup.sh` ran for real on 2026-11-23 (it copied the manually uploaded covers); restoring from it has not been tried.
 - Public pages are purged on every admin write (home, kind pages, `/index.json`, the entry page, replaced cover paths), in the data centre that handled the write; other locations expire on the normal TTL.
