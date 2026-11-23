@@ -95,3 +95,13 @@ test('works without JavaScript (server-rendered grid)', async ({ browser }) => {
 test('unknown entry is a 404', async ({ request }) => {
   expect((await request.get('/entry/movie/nope-nope')).status()).toBe(404);
 });
+
+test('entries without a cover show a placeholder (server-rendered list, grid and detail page)', async ({ page, request }) => {
+  const slug = await seed(request, { kind: 'game', title: 'E2E No Cover Game' });
+  await page.goto('/?kind=game');
+  await expect(page.locator('#grid li', { hasText: 'E2E No Cover Game' }).locator('.ph')).toBeVisible();
+  await page.goto(`/entry/game/${slug}`);
+  await expect(page.locator('.cover.ph')).toBeVisible();
+  const html = await (await request.get('/?kind=game')).text();
+  expect(html).toContain('class="ph"'); // present without JavaScript too
+});

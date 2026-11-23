@@ -2,7 +2,7 @@
 //! server-rendered grid by loading the cached `/index.json` once and filtering locally, so
 //! search, filter and sort cost zero D1 reads.
 
-/// Palette from docs/discovery.md: #c6d8ff #71a9f7 #6b5ca5 #72195a #4c1036.
+/// Palette: #c6d8ff #71a9f7 #6b5ca5 #72195a #4c1036 (Periwinkle, Cool Horizon, Dusty Grape, Royal Plum, Crimson Violet).
 pub const CSS: &str = r#"
 :root{--bg:#f6f8ff;--fg:#4c1036;--muted:#6b5ca5;--accent:#72195a;--card:#fff;--line:#c6d8ff;--ph:#c6d8ff}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#1a0a14;--fg:#c6d8ff;--muted:#71a9f7;--accent:#71a9f7;--card:#2a1020;--line:#4c1036;--ph:#4c1036}}
@@ -38,6 +38,22 @@ ul.plain li{margin:.5rem 0}
 ul#results li{display:flex;align-items:center;gap:.5rem}
 fieldset{border:1px solid var(--line);border-radius:.4rem;margin:1rem 0}
 .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+.ph{background:var(--ph) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b5ca5' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Ccircle cx='9' cy='9' r='1.5'/%3E%3Cpath d='M21 15l-5-5L5 21'/%3E%3C/svg%3E") center/34% no-repeat}
+.ph.cover{display:block;max-width:16rem;width:100%;aspect-ratio:2/3;border-radius:.3rem}
+.edit{display:grid;gap:1.5rem;grid-template-columns:1fr;margin-top:1rem}
+@media(min-width:48rem){.edit{grid-template-columns:16rem 1fr;align-items:start}}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.25rem 1rem}
+.fields .wide{grid-column:1/-1}
+.fields input,.fields select,.fields textarea{width:100%}
+#coverbox details{margin:.75rem 0}
+#coverbox input{width:100%;min-width:0}
+#msg{position:fixed;left:50%;bottom:1rem;transform:translateX(-50%);max-width:90vw;margin:0;padding:.6rem 1rem;border-radius:.5rem;background:var(--card);color:var(--fg);border:1px solid var(--line);box-shadow:0 2px 10px rgba(0,0,0,.25);z-index:10;pointer-events:none}
+#msg:empty{display:none}
+#msg.ok{border-color:#2e7d32}
+#msg.err{border-color:#b3261e;color:#b3261e}
+#msg.busy::before{content:"";display:inline-block;width:.8em;height:.8em;margin-right:.5em;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+[aria-busy=true]{opacity:.7}
 "#;
 
 /// Runs before first paint so a saved theme never flashes.

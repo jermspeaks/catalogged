@@ -308,7 +308,7 @@ async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Axu
                 @for e in &entries {
                     li {
                         a href={"/entry/" (e.kind.as_str()) "/" (e.slug)} {
-                            @if let Some(key) = &e.cover_key { img src=(cover_src(&state.env, key)) alt="" loading="lazy" width="300" height="450"; }
+                            @if let Some(key) = &e.cover_key { img src=(cover_src(&state.env, key)) alt="" loading="lazy" width="300" height="450"; } @else { div.ph {} }
                             div { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
                         }
                         small { (e.kind.as_str()) " · " (e.status.as_str()) @if let Some(r) = e.rating { " · " (r) "/10" } }
@@ -340,7 +340,7 @@ async fn entry_page(State(state): State<AppState>, Path((kind, slug)): Path<(Str
             header.top { p { a href="/" { "← all" } } (public_ui::theme_picker()) }
             h1 { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
             p { small { a href={"/admin/edit/" (e.kind.as_str()) "/" (e.slug)} { "Edit" } } }
-            @if let Some(key) = &e.cover_key { img.cover src=(cover_src(&e_env, key)) alt="" width="300" height="450"; }
+            @if let Some(key) = &e.cover_key { img.cover src=(cover_src(&e_env, key)) alt="" width="300" height="450"; } @else { div.cover.ph {} }
             p {
                 (e.kind.as_str()) " · " (e.status.as_str())
                 @if let Some(r) = e.rating { " · " (r) "/10" }

@@ -142,6 +142,13 @@ test('edit page: find a cover by searching sources (provider mocked)', async ({ 
   await page.getByRole('button', { name: 'Use this cover' }).click();
   await expect(page.locator('#msg')).toContainText('Cover updated');
   expect(searched).toBe('E2E Cover Search');
+  // picking the record also fills the provider id and year in the (unsaved) form
+  await expect(page.locator('input[name=external_id]')).toHaveValue('2');
+  await expect(page.locator('input[name=year]')).toHaveValue('2019');
+  await expect(page.locator('#coverph')).toHaveCount(0); // placeholder replaced by the new cover
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('#msg')).toContainText('Saved');
+  expect((await entry(request, 'movie', slug)).body).toMatchObject({ source: 'tmdb', external_id: '2', year: 2019 });
   const src = (await page.locator('#coverimg').getAttribute('src'))!;
   expect((await entry(request, 'movie', slug)).body.cover_key).toMatch(/^movie\/.+-[0-9a-f]{8}\.webp$/);
   expect((await request.get(src)).status()).toBe(200);
@@ -169,4 +176,30 @@ test('image relay refuses unsafe links', async ({ request }) => {
     const r = await request.get(`/admin/api/image?url=${encodeURIComponent(url)}`);
     expect(r.status(), url).toBe(400);
   }
+});
+
+test('edit page: placeholder without a cover, toast and busy state while saving', async ({ page, request }) => {
+  const slug = await seed(request, { kind: 'book', title: 'E2E Toast Me' });
+  await page.goto(`/admin/edit/book/${slug}`);
+  await expect(page.locator('#coverph')).toBeVisible();
+  await expect(page.locator('#msg')).toBeHidden(); // nothing to say yet
+
+  // Hold the save so the loading state is observable.
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route(`**/admin/api/entries/book/${slug}`, async (r) => { if (r.request().method() === 'PUT') await gate; await r.continue(); });
+  await page.fill('input[name=rating]', '7');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('#msg')).toHaveClass(/busy/);
+  await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+  await expect(page.locator('#edit')).toHaveAttribute('aria-busy', 'true');
+  release();
+  await expect(page.locator('#msg')).toHaveClass(/ok/);
+  await expect(page.locator('#msg')).toContainText('Saved');
+  await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled();
+
+  await page.fill('input[name=rating]', '99');
+  await page.evaluate(() => (document.querySelector('input[name=rating]') as HTMLInputElement).removeAttribute('max'));
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('#msg')).toHaveClass(/err/); // failures are styled, not just text
 });
