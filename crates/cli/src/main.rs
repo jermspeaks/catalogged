@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use catalogged_core::{tmdb, Kind, NewEntry, Source, Status, MAX_COVER_BYTES};
+use catalogged_core::{tmdb, EditEntry, Entry, Kind, NewEntry, Source, Status, MAX_COVER_BYTES};
 use clap::{Parser, Subcommand};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
@@ -40,8 +40,12 @@ enum Cmd {
         rating: Option<u8>,
         #[arg(long)]
         year: Option<i32>,
+        /// Your review text
         #[arg(long)]
-        notes: Option<String>,
+        review: Option<String>,
+        /// Date logged/watched, YYYY-MM-DD (defaults to today when status is consumed)
+        #[arg(long)]
+        date: Option<String>,
         /// tmdb | igdb | open_library
         #[arg(long)]
         source: Option<String>,
@@ -51,6 +55,35 @@ enum Cmd {
         #[arg(long)]
         no_cover: bool,
     },
+    /// Edit an entry's fields (only the flags you pass change). Empty string clears --review/--date; --rating 0 clears the rating
+    Edit {
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        slug: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        rating: Option<u8>,
+        #[arg(long)]
+        review: Option<String>,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        year: Option<i32>,
+    },
+    /// Delete an entry (and its cover)
+    Delete {
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        slug: String,
+        /// Required: deleting cannot be undone
+        #[arg(long)]
+        yes: bool,
+    },
     /// Search TMDB for movies or shows and print their ids
     Search {
         /// movie | show
@@ -59,7 +92,7 @@ enum Cmd {
         query: String,
     },
     /// Bulk-add entries from a CSV with columns:
-    /// kind,title,status,rating,notes,year,source,external_id
+    /// kind,title,status,rating,review,year,source,external_id,consumed_at (`notes` is accepted as an alias for `review`)
     Import {
         file: PathBuf,
         /// Parse and validate only; send nothing
@@ -69,6 +102,10 @@ enum Cmd {
         #[arg(long)]
         no_cover: bool,
     },
+}
+
+fn today_if_consumed(status: Status) -> Option<String> {
+    (status == Status::Consumed).then(|| chrono::Local::now().format("%Y-%m-%d").to_string())
 }
 
 fn parse<T: DeserializeOwned>(s: &str) -> Result<T> {
@@ -112,6 +149,35 @@ impl Client {
             slug: String,
         }
         Ok(res.json::<Created>()?.slug)
+    }
+
+    fn entry_url(&self, kind: Kind, slug: &str) -> String {
+        format!("{}/admin/api/entries/{}/{slug}", self.url, kind.as_str())
+    }
+
+    fn check(res: reqwest::blocking::Response) -> Result<reqwest::blocking::Response> {
+        if res.status().is_redirection() {
+            bail!("{} redirect: Cloudflare Access rejected the credentials", res.status());
+        }
+        if !res.status().is_success() {
+            bail!("{}: {}", res.status(), res.text().unwrap_or_default());
+        }
+        Ok(res)
+    }
+
+    fn get_entry(&self, kind: Kind, slug: &str) -> Result<Entry> {
+        let res = self.http.get(self.entry_url(kind, slug)).headers(self.headers.clone()).send()?;
+        Ok(Self::check(res)?.json()?)
+    }
+
+    fn edit_entry(&self, kind: Kind, slug: &str, e: &EditEntry) -> Result<()> {
+        let res = self.http.put(self.entry_url(kind, slug)).headers(self.headers.clone()).json(e).send()?;
+        Self::check(res).map(drop)
+    }
+
+    fn delete_entry(&self, kind: Kind, slug: &str) -> Result<()> {
+        let res = self.http.delete(self.entry_url(kind, slug)).headers(self.headers.clone()).send()?;
+        Self::check(res).map(drop)
     }
 
     fn put_cover(&self, kind: Kind, slug: &str, webp: Vec<u8>) -> Result<()> {
@@ -225,20 +291,46 @@ fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
     match &cli.cmd {
-        Cmd::Add { kind, title, status, rating, year, notes, source, external_id, no_cover } => {
+        Cmd::Add { kind, title, status, rating, year, review, date, source, external_id, no_cover } => {
+            let status = parse::<Status>(status)?;
             let entry = NewEntry {
                 kind: parse::<Kind>(kind)?,
                 title: title.clone().unwrap_or_default(),
-                status: parse::<Status>(status)?,
+                status,
                 rating: *rating,
-                notes: notes.clone(),
+                review: review.clone(),
                 year: *year,
                 source: source.as_deref().map(parse::<Source>).transpose()?,
                 external_id: external_id.clone(),
+                consumed_at: date.clone().or_else(|| today_if_consumed(status)),
             };
             let tmdb = Tmdb::new(cli.tmdb_key.as_ref()).ok();
             let title = add_one(&Client::new(&cli)?, tmdb.as_ref(), entry, !no_cover)?;
             println!("added {title}");
+        }
+        Cmd::Edit { kind, slug, title, status, rating, review, date, year } => {
+            let kind = parse::<Kind>(kind)?;
+            let client = Client::new(&cli)?;
+            let cur = client.get_entry(kind, slug)?;
+            let blank = |s: &Option<String>| s.as_ref().map(|v| if v.is_empty() { None } else { Some(v.clone()) });
+            let edit = EditEntry {
+                title: title.clone().unwrap_or(cur.title),
+                status: status.as_deref().map(parse::<Status>).transpose()?.unwrap_or(cur.status),
+                rating: rating.map(|r| if r == 0 { None } else { Some(r) }).unwrap_or(cur.rating),
+                review: blank(review).unwrap_or(cur.review),
+                year: year.or(cur.year),
+                consumed_at: blank(date).unwrap_or(cur.consumed_at),
+            };
+            edit.validate().map_err(anyhow::Error::msg)?;
+            client.edit_entry(kind, slug, &edit)?;
+            println!("updated {}", edit.title);
+        }
+        Cmd::Delete { kind, slug, yes } => {
+            if !yes {
+                bail!("refusing to delete without --yes (this cannot be undone)");
+            }
+            Client::new(&cli)?.delete_entry(parse::<Kind>(kind)?, slug)?;
+            println!("deleted {slug}");
         }
         Cmd::Search { kind, query } => {
             let kind = parse::<Kind>(kind)?;
@@ -260,7 +352,10 @@ fn main() -> Result<()> {
             let client = Client::new(&cli)?;
             let tmdb = Tmdb::new(cli.tmdb_key.as_ref()).ok();
             let mut failed = 0;
-            for e in entries {
+            for mut e in entries {
+                if e.consumed_at.is_none() {
+                    e.consumed_at = today_if_consumed(e.status);
+                }
                 let label = if e.title.is_empty() { e.external_id.clone().unwrap_or_default() } else { e.title.clone() };
                 match add_one(&client, tmdb.as_ref(), e, !no_cover) {
                     Ok(title) => println!("ok    {title}"),

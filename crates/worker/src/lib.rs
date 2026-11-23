@@ -8,7 +8,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use catalogged_core::{slugify, tmdb, Entry, Kind, NewEntry, MAX_COVER_BYTES};
+use catalogged_core::{slugify, tmdb, EditEntry, Entry, Kind, NewEntry, MAX_COVER_BYTES};
 use maud::{html, Markup, DOCTYPE};
 use serde::Deserialize;
 use tower_service::Service;
@@ -33,6 +33,7 @@ const COVER_CACHE: &str = "public, max-age=86400";
 fn router(env: Env) -> Router {
     Router::new()
         .route("/", get(home))
+        .route("/entry/{kind}/{slug}", get(entry_page))
         .route("/covers/{kind}/{file}", get(serve_cover))
         .route("/healthz", get(|| async { "ok" }))
         // Everything under /admin is gated by Cloudflare Access (see docs/plan.md), and
@@ -41,6 +42,10 @@ fn router(env: Env) -> Router {
         .route("/admin/", get(admin_page))
         .route("/admin/api/search", get(search))
         .route("/admin/api/entries", post(create_entry))
+        .route(
+            "/admin/api/entries/{kind}/{slug}",
+            get(get_entry).put(edit_entry).delete(delete_entry),
+        )
         .route("/admin/api/entries/{kind}/{slug}/cover", put(put_cover))
         .with_state(AppState { env })
 }
@@ -49,7 +54,7 @@ fn router(env: Env) -> Router {
 async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<http::Response<worker::Body>> {
     console_error_panic_hook::set_once();
     let cacheable = req.method() == http::Method::GET && !req.uri().path().starts_with("/admin");
-    let key = req.uri().to_string();
+    let key = cache_key(&req.uri().to_string());
     let cache = Cache::default();
     if cacheable {
         if let Some(hit) = cache.get(&key, false).await? {
@@ -71,6 +76,23 @@ async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<http::Respon
         cache.put(&key, out.cloned()?).await?;
     }
     Ok(out.try_into()?)
+}
+
+/// Only the query params the pages actually read may vary the cache key; otherwise anyone could
+/// append `?x=1`, `?x=2`... to bypass the cache and burn D1 reads.
+fn cache_key(uri: &str) -> String {
+    let Ok(mut url) = Url::parse(uri) else { return uri.to_string() };
+    let mut keep: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(k, _)| k == "kind" || k == "page")
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    keep.sort();
+    url.set_query(None);
+    if !keep.is_empty() {
+        url.query_pairs_mut().extend_pairs(keep);
+    }
+    url.to_string()
 }
 
 fn admin_guard(env: &Env) -> Result<(), ApiErr> {
@@ -100,39 +122,122 @@ fn layout(title: &str, body: Markup) -> Markup {
     }
 }
 
-async fn load_entries(env: &Env) -> Result<Vec<Entry>> {
+const COLS: &str =
+    "id, kind, slug, title, status, rating, review, year, source, external_id, cover_key, consumed_at";
+const PAGE_SIZE: u32 = 60;
+const MAX_PAGE: u32 = 200;
+
+/// One page of entries, newest first. Fetches one extra row to know whether a next page exists
+/// (no COUNT(*): D1 bills rows scanned). `q` filters by title (admin only; scans the table).
+async fn load_entries(
+    env: &Env,
+    kind: Option<Kind>,
+    q: Option<&str>,
+    page: u32,
+) -> Result<(Vec<Entry>, bool)> {
     let db = env.d1("DB")?;
-    db.prepare(
-        "SELECT id, kind, slug, title, status, rating, notes, year, source, external_id, cover_key, consumed_at \
-         FROM entries ORDER BY updated_at DESC LIMIT 200",
-    )
-    .all()
-    .await?
-    .results::<Entry>()
+    let offset = f64::from(page.saturating_sub(1).min(MAX_PAGE) * PAGE_SIZE);
+    let limit = f64::from(PAGE_SIZE + 1);
+    let like = q.filter(|q| !q.is_empty()).map(|q| format!("%{}%", q.replace(['%', '_'], "")));
+    let stmt = match (kind, &like) {
+        (Some(k), None) => db
+            .prepare(format!("SELECT {COLS} FROM entries WHERE kind = ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3"))
+            .bind(&[k.as_str().into(), limit.into(), offset.into()])?,
+        (None, None) => db
+            .prepare(format!("SELECT {COLS} FROM entries ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2"))
+            .bind(&[limit.into(), offset.into()])?,
+        (_, Some(l)) => db
+            .prepare(format!("SELECT {COLS} FROM entries WHERE title LIKE ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3"))
+            .bind(&[l.clone().into(), limit.into(), offset.into()])?,
+    };
+    let mut rows = stmt.all().await?.results::<Entry>()?;
+    let more = rows.len() > PAGE_SIZE as usize;
+    rows.truncate(PAGE_SIZE as usize);
+    Ok((rows, more))
+}
+
+async fn find_entry(env: &Env, kind: &str, slug: &str) -> Result<Option<Entry>> {
+    env.d1("DB")?
+        .prepare(format!("SELECT {COLS} FROM entries WHERE kind = ?1 AND slug = ?2"))
+        .bind(&[kind.into(), slug.into()])?
+        .first::<Entry>(None)
+        .await
+}
+
+#[derive(Deserialize, Default)]
+struct ListQuery {
+    kind: Option<Kind>,
+    page: Option<u32>,
+    q: Option<String>,
 }
 
 #[worker::send]
-async fn home(State(state): State<AppState>) -> AxumResponse {
-    let entries = match load_entries(&state.env).await {
-        Ok(e) => e,
+async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> AxumResponse {
+    let page = lq.page.unwrap_or(1).clamp(1, MAX_PAGE);
+    let (entries, more) = match load_entries(&state.env, lq.kind, None, page).await {
+        Ok(r) => r,
         Err(e) => return internal(e).into_response(),
     };
-    let page = layout(
+    let link = |k: Option<Kind>, p: u32| {
+        let mut u = format!("/?page={p}");
+        if let Some(k) = k {
+            u.push_str(&format!("&kind={}", k.as_str()));
+        }
+        u
+    };
+    let page_html = layout(
         "catalogged",
         html! {
             h1 { "catalogged" }
+            nav {
+                a href="/" { "all" }
+                @for k in [Kind::Movie, Kind::Show, Kind::Game, Kind::Book] { " · " a href={"/?kind=" (k.as_str())} { (k.as_str()) "s" } }
+            }
             ul.grid {
                 @for e in &entries {
                     li {
-                        @if let Some(key) = &e.cover_key { img src={"/covers/" (key)} alt="" loading="lazy" width="300" height="450"; }
-                        div { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
-                        small { (e.kind.as_str()) " · " (e.status.as_str()) }
+                        a href={"/entry/" (e.kind.as_str()) "/" (e.slug)} {
+                            @if let Some(key) = &e.cover_key { img src={"/covers/" (key)} alt="" loading="lazy" width="300" height="450"; }
+                            div { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
+                        }
+                        small { (e.kind.as_str()) " · " (e.status.as_str()) @if let Some(r) = e.rating { " · " (r) "/10" } }
                     }
                 }
             }
+            p {
+                @if page > 1 { a href=(link(lq.kind, page - 1)) { "← newer" } }
+                @if page > 1 && more { " · " }
+                @if more { a href=(link(lq.kind, page + 1)) { "older →" } }
+            }
         },
     );
-    ([(header::CACHE_CONTROL, PUBLIC_CACHE)], Html(page.into_string())).into_response()
+    ([(header::CACHE_CONTROL, PUBLIC_CACHE)], Html(page_html.into_string())).into_response()
+}
+
+#[worker::send]
+async fn entry_page(State(state): State<AppState>, Path((kind, slug)): Path<(String, String)>) -> AxumResponse {
+    let e = match find_entry(&state.env, &kind, &slug).await {
+        Ok(Some(e)) => e,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => return internal(e).into_response(),
+    };
+    let page_html = layout(
+        &e.title,
+        html! {
+            p { a href="/" { "← all" } }
+            h1 { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
+            @if let Some(key) = &e.cover_key { img src={"/covers/" (key)} alt="" width="300" height="450"; }
+            p {
+                (e.kind.as_str()) " · " (e.status.as_str())
+                @if let Some(r) = e.rating { " · " (r) "/10" }
+                @if let Some(d) = &e.consumed_at { " · " (d) }
+            }
+            @if let Some(review) = &e.review {
+                @for para in review.split("\n\n") { p { (para) } }
+            }
+        },
+    );
+    ([(header::CACHE_CONTROL, PUBLIC_CACHE)], Html(page_html.into_string())).into_response()
 }
 
 #[worker::send]
@@ -159,10 +264,84 @@ async fn serve_cover(State(state): State<AppState>, Path((kind, file)): Path<(St
 }
 
 #[worker::send]
-async fn admin_page(State(state): State<AppState>) -> Result<Html<String>, ApiErr> {
+async fn admin_page(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Result<Html<String>, ApiErr> {
     admin_guard(&state.env)?;
-    let entries = load_entries(&state.env).await.map_err(internal)?;
-    Ok(Html(admin_ui::page(&entries).into_string()))
+    let page = lq.page.unwrap_or(1).clamp(1, MAX_PAGE);
+    let q = lq.q.as_deref().map(str::trim).unwrap_or("");
+    let (entries, more) = load_entries(&state.env, None, Some(q), page).await.map_err(internal)?;
+    Ok(Html(admin_ui::page(&entries, page, more, q).into_string()))
+}
+
+#[worker::send]
+async fn get_entry(State(state): State<AppState>, Path((kind, slug)): Path<(String, String)>) -> Result<Json<Entry>, ApiErr> {
+    admin_guard(&state.env)?;
+    match find_entry(&state.env, &kind, &slug).await.map_err(internal)? {
+        Some(e) => Ok(Json(e)),
+        None => Err((StatusCode::NOT_FOUND, "no such entry".into())),
+    }
+}
+
+#[worker::send]
+async fn edit_entry(
+    State(state): State<AppState>,
+    Path((kind, slug)): Path<(String, String)>,
+    Json(edit): Json<EditEntry>,
+) -> Result<Json<Entry>, ApiErr> {
+    admin_guard(&state.env)?;
+    edit.validate().map_err(|m| (StatusCode::BAD_REQUEST, m))?;
+    if find_entry(&state.env, &kind, &slug).await.map_err(internal)?.is_none() {
+        return Err((StatusCode::NOT_FOUND, "no such entry".into()));
+    }
+    state
+        .env
+        .d1("DB")
+        .map_err(internal)?
+        .prepare(
+            "UPDATE entries SET title = ?1, status = ?2, rating = ?3, review = ?4, year = ?5, consumed_at = ?6, \
+             updated_at = datetime('now') WHERE kind = ?7 AND slug = ?8",
+        )
+        .bind(&[
+            edit.title.trim().into(),
+            edit.status.as_str().into(),
+            opt(edit.rating.map(f64::from)),
+            opt(edit.review.filter(|r| !r.trim().is_empty())),
+            opt(edit.year.map(f64::from)),
+            opt(edit.consumed_at.filter(|d| !d.is_empty())),
+            kind.clone().into(),
+            slug.clone().into(),
+        ])
+        .map_err(internal)?
+        .run()
+        .await
+        .map_err(internal)?;
+    let updated = find_entry(&state.env, &kind, &slug).await.map_err(internal)?;
+    updated.map(Json).ok_or((StatusCode::NOT_FOUND, "no such entry".into()))
+}
+
+#[worker::send]
+async fn delete_entry(
+    State(state): State<AppState>,
+    Path((kind, slug)): Path<(String, String)>,
+) -> Result<StatusCode, ApiErr> {
+    admin_guard(&state.env)?;
+    let Some(entry) = find_entry(&state.env, &kind, &slug).await.map_err(internal)? else {
+        return Err((StatusCode::NOT_FOUND, "no such entry".into()));
+    };
+    state
+        .env
+        .d1("DB")
+        .map_err(internal)?
+        .prepare("DELETE FROM entries WHERE kind = ?1 AND slug = ?2")
+        .bind(&[kind.into(), slug.into()])
+        .map_err(internal)?
+        .run()
+        .await
+        .map_err(internal)?;
+    // Remove the cover too, so deleted entries don't leave R2 storage behind.
+    if let Some(key) = entry.cover_key {
+        state.env.bucket("COVERS").map_err(internal)?.delete(key).await.map_err(internal)?;
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -212,6 +391,7 @@ async fn create_entry(
     Json(new): Json<NewEntry>,
 ) -> Result<Json<serde_json::Value>, ApiErr> {
     admin_guard(&state.env)?;
+    new.validate().map_err(|m| (StatusCode::BAD_REQUEST, m))?;
     let db = state.env.d1("DB").map_err(internal)?;
     let slug = slugify(&new.title);
     if slug.is_empty() {
@@ -222,8 +402,8 @@ async fn create_entry(
         .and_then(|s| serde_json::to_value(s).ok())
         .and_then(|v| v.as_str().map(String::from));
     db.prepare(
-        "INSERT INTO entries (kind, slug, title, status, rating, notes, year, source, external_id) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO entries (kind, slug, title, status, rating, review, year, source, external_id, consumed_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )
     .bind(&[
         new.kind.as_str().into(),
@@ -231,10 +411,11 @@ async fn create_entry(
         new.title.into(),
         new.status.as_str().into(),
         opt(new.rating.map(f64::from)),
-        opt(new.notes),
+        opt(new.review),
         opt(new.year.map(f64::from)),
         opt(source),
         opt(new.external_id),
+        opt(new.consumed_at),
     ])
     .map_err(internal)?
     .run()

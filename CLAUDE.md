@@ -46,4 +46,6 @@ Inspiration: https://erika.florist/catalogue/ (a local copy is at `~/projects/er
 - **Tooling:** bulk import/backfills should be a local Rust CLI, not Worker code. The Cloudflare MCP (https://mcp.cloudflare.com/mcp) can be used to create the D1 database and R2 bucket.
 
 - **Deploys are separate from merges.** Do not deploy or change production secrets without being asked; changes go in a PR for review first.
+- Schema changes go in a new numbered file in `migrations/` (never edit an applied one), and must be applied to production with `wrangler d1 migrations apply catalogged --remote` **before** deploying code that needs them. List queries must stay index-friendly and paginated: D1 bills rows scanned.
+- Reviews live in `entries.review` (renamed from `notes`; the input alias `notes` still works). `consumed_at` is the date logged/watched (`YYYY-MM-DD`).
 - **CLI:** `catalogged add` (single) and `catalogged import <csv>` (bulk), both going through the Worker API.
