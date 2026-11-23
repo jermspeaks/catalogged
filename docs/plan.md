@@ -6,6 +6,8 @@
 - Public read-only site; private admin for adding and editing; a CLI for single and bulk adds.
 - Rust where practical. Cloudflare only. $0 or as close as possible.
 
+See [free-tier.md](free-tier.md) for the budget and guard rules.
+
 ## Architecture
 
 | Layer | Choice | Notes |

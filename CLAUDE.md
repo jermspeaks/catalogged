@@ -25,7 +25,7 @@ cd crates/worker && wrangler d1 migrations apply catalogged --local
 
 ## What this is
 
-A personal catalogue of video games, books, TV shows, and movies: media consumed plus a "wants" library. Public read-only site plus an admin UI for adding entries. Spend $0 (or as close as possible).
+A personal catalogue of video games, books, TV shows, and movies: media consumed plus a "wants" library. Public read-only site plus an admin UI for adding entries. Spend $0 (or as close as possible): **stay inside the Cloudflare free tier at all times** and check `docs/free-tier.md` before adding anything that adds reads, writes, uploads or Worker CPU. Never upgrade to Workers Paid (on Free, Workers/D1 hard-stop instead of billing; R2 overage is the one thing that bills).
 
 Inspiration: https://erika.florist/catalogue/ (a local copy is at `~/projects/erika.florist`, useful for layout and data model reference). That site uses markdown files plus a Rust `xtask` and CI auto-commits. This project deliberately differs: entries live in D1 and are added through a web admin, not markdown and CI.
 

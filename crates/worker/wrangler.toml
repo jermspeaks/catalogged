@@ -8,7 +8,7 @@ command = "cargo install -q worker-build && worker-build --release"
 [[d1_databases]]
 binding = "DB"
 database_name = "catalogged"
-database_id = "REPLACE_ME" # from `wrangler d1 create catalogged`
+database_id = "9a4c9c5c-dd9d-4f50-b6c6-a2cda8be6ced"
 migrations_dir = "../../migrations"
 
 [[r2_buckets]]
