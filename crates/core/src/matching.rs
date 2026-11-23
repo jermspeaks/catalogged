@@ -77,13 +77,62 @@ pub fn canon(s: &str) -> Vec<String> {
             *t.last_mut().unwrap() = d.to_owned();
         }
     }
+    // "Seven Years in Tibet" and "7 Years in Tibet" are the same title.
+    for x in t.iter_mut() {
+        if let Some(d) = number_word(x) {
+            *x = d.to_owned();
+        }
+    }
     t
+}
+
+fn number_word(t: &str) -> Option<&'static str> {
+    Some(match t {
+        "one" => "1",
+        "two" => "2",
+        "three" => "3",
+        "four" => "4",
+        "five" => "5",
+        "six" => "6",
+        "seven" => "7",
+        "eight" => "8",
+        "nine" => "9",
+        "ten" => "10",
+        _ => return None,
+    })
 }
 
 /// The title before a subtitle ("Rework: Change the Way..." -> "Rework").
 fn primary(s: &str) -> &str {
-    let cut = [": ", " - ", " \u{2013} ", " \u{2014} "].iter().filter_map(|d| s.find(d)).min();
-    cut.map_or(s, |i| &s[..i])
+    let cut = [": ", ". ", " - ", " \u{2013} ", " \u{2014} "].iter().filter_map(|d| s.find(d)).min();
+    // "St. Elmo's Fire" must not shrink to "St": a very short head is not a title.
+    cut.filter(|&i| s[..i].chars().filter(|c| c.is_alphanumeric()).count() >= 4).map_or(s, |i| &s[..i])
+}
+
+/// Other ways to search for the same title, best first: the title as written, without a
+/// parenthetical ("Das Wunder von Bern (The Miracle of Bern)" -> "Das Wunder von Bern"), the
+/// parenthetical alone (usually the English title; skipped for books, where it is often the author),
+/// and the part before a subtitle (long subtitles make provider searches come back empty).
+pub fn variants(title: &str, allow_inner: bool) -> Vec<String> {
+    let title = title.trim();
+    let mut v = vec![title.to_owned()];
+    if let (Some(open), Some(close)) = (title.find('('), title.rfind(')')) {
+        if open < close {
+            let outer = format!("{} {}", &title[..open], &title[close + 1..]);
+            v.push(outer.split_whitespace().collect::<Vec<_>>().join(" "));
+            let inner = title[open + 1..close].trim();
+            if allow_inner && inner.chars().filter(|c| c.is_alphabetic()).count() >= 4 {
+                v.push(inner.to_owned());
+            }
+        }
+    }
+    let p = primary(title).trim();
+    if p != title {
+        v.push(p.to_owned());
+    }
+    let mut seen = std::collections::HashSet::new();
+    v.retain(|x| !x.is_empty() && seen.insert(x.to_lowercase()));
+    v
 }
 
 fn lev(a: &[char], b: &[char]) -> usize {
@@ -180,6 +229,22 @@ mod tests {
         assert_eq!(canon("The Godfather: Part I"), canon("The Godfather"));
         assert_ne!(canon("The Godfather: Part II"), canon("The Godfather"));
         assert_eq!(canon("Naked Gun 2 1/2"), canon("The Naked Gun 2\u{bd}"));
+    }
+
+    #[test]
+    fn number_words_and_short_heads() {
+        assert_eq!(canon("7 Years in Tibet"), canon("Seven Years in Tibet"));
+        let f = [c("1", "Omnivore's Dilemma. A Natural History of Four Meals", Some(2006))];
+        assert_eq!(pick("The Omnivore's Dilemma", None, None, &f), (Some(0), Confidence::Check));
+        assert_eq!(pick("St. Elmo's Fire", None, None, &[c("1", "St. Louis Blues", Some(1939))]), (None, Confidence::None));
+    }
+
+    #[test]
+    fn search_variants() {
+        assert_eq!(variants("Das Wunder von Bern (The Miracle of Bern)", true), ["Das Wunder von Bern (The Miracle of Bern)", "Das Wunder von Bern", "The Miracle of Bern"]);
+        assert_eq!(variants("Republic (Plato)", false), ["Republic (Plato)", "Republic"]);
+        assert_eq!(variants("Vagabonding: An Uncommon Guide", false), ["Vagabonding: An Uncommon Guide", "Vagabonding"]);
+        assert_eq!(variants("Inception", true), ["Inception"]);
     }
 
     #[test]

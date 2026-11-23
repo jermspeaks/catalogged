@@ -572,11 +572,41 @@ fn match_csv(meta: &Meta, input: &PathBuf, output: &PathBuf, interactive: bool) 
         };
         let year = f[i_year].trim().parse::<i32>().ok();
         let creator_in = f[i_creator].trim().to_owned();
-        let query = if kind == Kind::Book && !creator_in.is_empty() { format!("{} {}", f[i_title], creator_in) } else { f[i_title].clone() };
-        match meta.search(kind, &query).or_else(|_| meta.search(kind, &f[i_title])) {
-            Ok(found) => {
-                let found = released_by(found, i_logged.map(|i| f[i].as_str()));
-                let (suggested, conf) = matching::pick(&f[i_title], year, (!creator_in.is_empty()).then_some(creator_in.as_str()), &found);
+        let creator_opt = (!creator_in.is_empty()).then_some(creator_in.as_str());
+        // Try the title as written, then variants (no parenthetical, English title in parentheses, no subtitle).
+        // A match through a variant is never "high": the title differs from what the sheet says.
+        let mut best: Option<(Vec<Candidate>, Option<usize>, matching::Confidence)> = None;
+        let mut first: Option<Vec<Candidate>> = None;
+        let mut last_err = None;
+        for (vi, v) in matching::variants(&f[i_title], kind != Kind::Book).into_iter().enumerate() {
+            if vi > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            let query = if kind == Kind::Book && !creator_in.is_empty() { format!("{v} {creator_in}") } else { v.clone() };
+            let found = match meta.search(kind, &query).or_else(|_| meta.search(kind, &v)) {
+                Ok(x) => released_by(x, i_logged.map(|i| f[i].as_str())),
+                Err(e) => {
+                    last_err = Some(e);
+                    continue;
+                }
+            };
+            let (pick, mut conf) = matching::pick(&v, year, creator_opt, &found);
+            if vi > 0 && conf == matching::Confidence::High {
+                conf = matching::Confidence::Check;
+            }
+            if first.is_none() {
+                first = Some(found.clone());
+            }
+            if pick.is_some() && best.as_ref().is_none_or(|b| b.2 != matching::Confidence::High && conf == matching::Confidence::High || b.1.is_none()) {
+                best = Some((found, pick, conf));
+            }
+            if best.as_ref().is_some_and(|b| b.2 == matching::Confidence::High) {
+                break;
+            }
+        }
+        let result = best.or_else(|| first.map(|fnd| (fnd, None, matching::Confidence::None)));
+        match result.ok_or_else(|| last_err.unwrap_or_else(|| anyhow::anyhow!("no search results"))) {
+            Ok((found, suggested, conf)) => {
                 let (mut chosen, mut label) = (suggested, conf.as_str());
                 if interactive && conf != matching::Confidence::High {
                     match ask(&f[i_title], year, &creator_in, &found, suggested, conf)? {
