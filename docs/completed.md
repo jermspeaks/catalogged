@@ -10,7 +10,7 @@ _Last reviewed: 2026-11-23, after PR #16._
 |---|---|
 | Code on `main` | Everything below, through PR #19 (creator field and matching) |
 | Production | Deployed from `main` (PR #19) at https://catalog.05152024.xyz; `workers.dev` and preview URLs are off. All migrations applied, through `0003` |
-| Data | 79 entries: the 2010 log is imported (75) plus a few added by hand; all have covers, 77 have a provider id and 76 a creator. Later years not yet imported |
+| Data | 202 entries: the 2010 and 2011 logs are imported plus a few added by hand; 193 have covers, 192 a provider id and 197 a creator. Later years not yet imported |
 | Infrastructure | D1 `catalogged`, R2 `catalogged-covers`, Worker `catalogged`, Access in front of `/admin`, billing alert set, Workers Free plan |
 
 ## Infrastructure and security
