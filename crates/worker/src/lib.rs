@@ -72,9 +72,9 @@ fn router(env: Env) -> Router {
 #[event(fetch)]
 async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<http::Response<worker::Body>> {
     console_error_panic_hook::set_once();
-    // DISABLE_CACHE=1 is for the e2e tests only (so writes show up immediately); never set it in production.
-    let cache_off = env.var("DISABLE_CACHE").map(|v| v.to_string()).ok().as_deref() == Some("1");
-    let cacheable = !cache_off && req.method() == http::Method::GET && !req.uri().path().starts_with("/admin");
+    let cacheable = req.method() == http::Method::GET && !req.uri().path().starts_with("/admin");
+    // A successful write under /admin/api/entries clears the cached pages it can change (see `purge_paths`).
+    let write_path = (req.method() != http::Method::GET && req.uri().path().starts_with("/admin/api/entries")).then(|| (req.uri().to_string(), req.uri().path().to_string()));
     if req.uri().path().starts_with("/admin") {
         if let Err((code, msg)) = access::verify(&env, req.headers()).await {
             let mut res = Response::error(msg, code)?;
@@ -95,15 +95,51 @@ async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<http::Respon
         .await
         .map_err(|e| Error::RustError(e.to_string()))?;
     let mut out = Response::from_bytes(bytes.to_vec())?.with_status(parts.status.as_u16());
+    let mut extra: Vec<String> = vec![];
     for (name, value) in parts.headers.iter() {
-        if let Ok(v) = value.to_str() {
+        let Ok(v) = value.to_str() else { continue };
+        if name.as_str() == PURGE_HEADER {
+            extra.push(v.to_string()); // internal: handlers name extra paths to clear; never sent to clients
+        } else {
             out.headers_mut().set(name.as_str(), v)?;
+        }
+    }
+    if let (Some((uri, path)), true) = (write_path, parts.status.is_success()) {
+        let cache = Cache::default();
+        for p in purge_paths(&path, &extra) {
+            // Best effort: a failed delete only means the old copy lives until its TTL.
+            let _ = cache.delete(&cache_key(&join_origin(&uri, &p)), false).await;
         }
     }
     if cacheable && parts.status == StatusCode::OK && parts.headers.contains_key(header::CACHE_CONTROL) {
         cache.put(&key, out.cloned()?).await?;
     }
     Ok(out.try_into()?)
+}
+
+/// Internal response header: a handler lists extra paths whose cached copy must go (stripped in `fetch`).
+const PURGE_HEADER: &str = "x-purge-path";
+
+fn join_origin(uri: &str, path_and_query: &str) -> String {
+    match Url::parse(uri).and_then(|u| u.join(path_and_query)) {
+        Ok(u) => u.to_string(),
+        Err(_) => path_and_query.to_string(),
+    }
+}
+
+/// Cached public paths a write can change: the home page (first page, each kind), `/index.json`, and the
+/// entry's detail page when the write is on one. Later pages of the no-JS list lag up to the 5 minute TTL.
+/// The Cache API is per data centre, so this clears the copy where the admin's request ran; other
+/// locations expire on their own. A handful of cache operations per write, well under the subrequest limit.
+fn purge_paths(path: &str, extra: &[String]) -> Vec<String> {
+    let mut v: Vec<String> = vec!["/".into(), "/index.json".into()];
+    v.extend(["movie", "show", "book", "game"].map(|k| format!("/?kind={k}")));
+    let mut segs = path.trim_start_matches("/admin/api/entries").trim_matches('/').split('/');
+    if let (Some(kind), Some(slug)) = (segs.next().filter(|s| !s.is_empty()), segs.next()) {
+        v.push(format!("/entry/{kind}/{slug}"));
+    }
+    v.extend(extra.iter().cloned());
+    v
 }
 
 /// Only the query params the pages actually read may vary the cache key; otherwise anyone could
@@ -460,7 +496,7 @@ async fn edit_entry(
 async fn delete_entry(
     State(state): State<AppState>,
     Path((kind, slug)): Path<(String, String)>,
-) -> Result<StatusCode, ApiErr> {
+) -> Result<AxumResponse, ApiErr> {
     admin_guard(&state.env)?;
     let Some(entry) = find_entry(&state.env, &kind, &slug).await.map_err(internal)? else {
         return Err((StatusCode::NOT_FOUND, "no such entry".into()));
@@ -476,10 +512,12 @@ async fn delete_entry(
         .await
         .map_err(internal)?;
     // Remove the cover too, so deleted entries don't leave R2 storage behind.
+    let mut purge = vec![];
     if let Some(key) = entry.cover_key {
-        state.env.bucket("COVERS").map_err(internal)?.delete(key).await.map_err(internal)?;
+        state.env.bucket("COVERS").map_err(internal)?.delete(key.clone()).await.map_err(internal)?;
+        purge.push(format!("/covers/{key}"));
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok((StatusCode::NO_CONTENT, purge_headers(&purge)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -640,6 +678,16 @@ async fn proxy_image(State(state): State<AppState>, Query(q): Query<ImageQuery>)
     Ok(([(header::CONTENT_TYPE, ctype), (header::CACHE_CONTROL, "no-store".to_string())], bytes).into_response())
 }
 
+fn purge_headers(paths: &[String]) -> http::HeaderMap {
+    let mut h = http::HeaderMap::new();
+    for p in paths {
+        if let Ok(v) = http::HeaderValue::from_str(p) {
+            h.append(PURGE_HEADER, v);
+        }
+    }
+    h
+}
+
 fn is_webp(b: &[u8]) -> bool {
     b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP"
 }
@@ -649,7 +697,7 @@ async fn put_cover(
     State(state): State<AppState>,
     Path((kind, slug)): Path<(String, String)>,
     body: Bytes,
-) -> Result<Json<serde_json::Value>, ApiErr> {
+) -> Result<AxumResponse, ApiErr> {
     admin_guard(&state.env)?;
     // Free-tier guard: bounded size, and only real WebP (see docs/free-tier.md).
     if body.len() > MAX_COVER_BYTES {
@@ -695,9 +743,11 @@ async fn put_cover(
         .run()
         .await
         .map_err(internal)?;
+    let mut purge = vec![];
     if let Some(old) = old_key.filter(|o| *o != key) {
         // Best effort: a failed delete only leaves one orphan object.
-        let _ = bucket.delete(old).await;
+        let _ = bucket.delete(old.clone()).await;
+        purge.push(format!("/covers/{old}"));
     }
-    Ok(Json(serde_json::json!({ "cover_key": key, "url": cover_src(&state.env, &key) })))
+    Ok((purge_headers(&purge), Json(serde_json::json!({ "cover_key": key, "url": cover_src(&state.env, &key) }))).into_response())
 }

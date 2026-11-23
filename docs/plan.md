@@ -81,7 +81,7 @@ At personal-site traffic both are fine; the bucket domain mainly buys headroom a
 ### 6. Admin gaps: built
 - `/admin` has Add by id (TMDB, IMDb `tt`, Open Library work id, IGDB id), Add manually (no provider, optional cover file), and a catalogue list linking to a per-entry edit page `/admin/edit/{kind}/{slug}`: all fields, cover upload/replace, and Delete behind a confirm dialog. Detail pages link to the edit page (Access gates it). Admin pages share the theme picker and link back to the public site; favicon and web manifest added.
 - Covers now use content-hashed keys (`kind/slug-<hash>.webp`) with an immutable one-year cache; replacing a cover writes a new key and deletes the old object, so stale images are impossible. Older unhashed keys keep working until replaced.
-- Still optional: purge cached public pages after an edit or delete (they refresh within 5 minutes).
+- Done: writes purge the cached public pages they change (home, kind pages, `/index.json`, the entry page, replaced cover paths). The Cache API is per data centre, so this clears the copy where the admin's request ran; other locations expire on the normal TTL (5 min; 15 for `/index.json`). Later pages of the no-JS list are not purged.
 
 ### 6b. Matching and cover search: built
 - `catalogged match in.csv out.csv` fills provider ids for id-less rows (see README). Pure picking logic is in `crates/core/src/matching.rs` (exact normalised title; year within 1 separates remakes; otherwise `check`). Not done: fuzzy matching for misspelt titles; those rows come back `none` with candidates to choose from.

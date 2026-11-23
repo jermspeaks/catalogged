@@ -56,4 +56,4 @@ _Last reviewed: 2026-11-23._
 ## Known gaps in what is "done"
 
 - The admin page's JavaScript (search, Add, canvas WebP, edit, delete) has never been run in a browser by the author of the code. The endpoints it calls were tested; the page itself needs a manual click-through.
-- Public pages and covers can be stale for up to 5 minutes / 24 hours after an edit or delete (no cache purge).
+- Public pages are purged on every admin write (home, kind pages, `/index.json`, the entry page, replaced cover paths), in the data centre that handled the write; other locations expire on the normal TTL.

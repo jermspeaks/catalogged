@@ -23,13 +23,13 @@ export default defineConfig({
     url: 'http://127.0.0.1:8790/',
     reuseExistingServer: false,
   }, {
-    // Fresh state every run, then migrations, then the Worker. DISABLE_CACHE keeps pages fresh
-    // between the test's writes and reads (the Cache API would otherwise serve stale pages).
+    // Fresh state every run, then migrations, then the Worker. The Cache API is on, as in production:
+    // writes purge the pages they change, so tests read their own writes.
     command:
       `rm -rf "${state}" && ` +
       `npx wrangler d1 migrations apply catalogged --local --persist-to "${state}" && ` +
       `npx wrangler dev --port ${PORT} --persist-to "${state}" ` +
-      `--var ADMIN_ENABLED:1 --var DISABLE_CACHE:1 --var COVERS_BASE_URL: ` +
+      `--var ADMIN_ENABLED:1 --var COVERS_BASE_URL: ` +
       `--var ACCESS_JWT_OPTIONAL: --var ACCESS_TEAM_DOMAIN:${TEAM} --var ACCESS_AUD:${AUD} ` +
       `--var ACCESS_JWKS_URL:http://127.0.0.1:8790/certs`,
     cwd: path.resolve(__dirname, '../crates/worker'),

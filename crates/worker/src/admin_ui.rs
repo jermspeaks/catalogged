@@ -100,7 +100,7 @@ async function add(kind, c, btn) {
     catch (e) { msg(`Added "${c.title}" but the cover failed: ${e.message}. Add one from its edit page.`); if (btn) btn.textContent = 'Added (no cover)'; return; }
   }
   if (btn) btn.textContent = 'Added ✓';
-  msg(`Added "${c.title}". Public pages refresh within ~5 minutes.`);
+  msg(`Added "${c.title}". Public pages update right away here; other locations catch up within minutes.`);
 }
 
 $('#search').addEventListener('submit', search);
@@ -129,7 +129,7 @@ $('#manual').addEventListener('submit', async (ev) => {
     try { await putCover(kind, slug, file); }
     catch (e) { msg(`Added "${title}" but the cover failed: ${e.message}`); return; }
   }
-  msg(`Added "${title}". Public pages refresh within ~5 minutes.`);
+  msg(`Added "${title}". Public pages update right away here; other locations catch up within minutes.`);
   f.reset();
 });
 "#;
@@ -147,7 +147,7 @@ form.addEventListener('submit', async (ev) => {
       rating: rating && Number(rating), year: year && Number(year), consumed_at: val('consumed_at'), review: val('review'),
       source: val('external_id') && SOURCE[kind], external_id: val('external_id') }),
   });
-  msg(r.ok ? 'Saved ✓ (public pages refresh within ~5 min)' : `Failed: ${r.status} ${(await r.text()).slice(0, 120)}`);
+  msg(r.ok ? 'Saved ✓ (public pages update right away here; other locations catch up within minutes)' : `Failed: ${r.status} ${(await r.text()).slice(0, 120)}`);
 });
 
 async function setCover(src) {

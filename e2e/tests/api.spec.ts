@@ -85,3 +85,28 @@ test('provider id: set, keep through the edit form, validate and reject duplicat
   expect(cleared.status()).toBe(200);
   expect((await entry(request, 'movie', a)).body).toMatchObject({ source: null, external_id: null });
 });
+
+test('writes clear the cached public pages (cache on, as in production)', async ({ request }) => {
+  const titles = async () => (await (await request.get('/index.json')).json()).items.map((i: unknown[]) => i[2]);
+  const home = async () => (await request.get('/')).text();
+  // Warm the caches, and prove they are populated (a second read is served from cache).
+  expect(await titles()).not.toContain('E2E Purge Me');
+  await home();
+  expect((await request.get('/index.json')).headers()['cache-control']).toContain('max-age');
+
+  const slug = await seed(request, { kind: 'show', title: 'E2E Purge Me' });
+  expect(await titles()).toContain('E2E Purge Me'); // create
+  expect(await home()).toContain('E2E Purge Me');
+  expect((await request.get('/?kind=show')).ok()).toBeTruthy();
+
+  const detail = await request.get(`/entry/show/${slug}`);
+  expect(await detail.text()).toContain('E2E Purge Me');
+  await request.put(`/admin/api/entries/show/${slug}`, { data: { title: 'E2E Purged', status: 'consumed', review: 'edited review' } });
+  expect(await titles()).toContain('E2E Purged'); // edit
+  expect(await (await request.get(`/entry/show/${slug}`)).text()).toContain('edited review');
+
+  await request.delete(`/admin/api/entries/show/${slug}`);
+  expect(await titles()).not.toContain('E2E Purged'); // delete
+  expect((await request.get(`/entry/show/${slug}`)).status()).toBe(404);
+  expect(await home()).not.toContain('E2E Purged');
+});
