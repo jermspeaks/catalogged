@@ -21,6 +21,8 @@ See [free-tier.md](free-tier.md) for the budget and guard rules.
 
 ### Write path
 
+Entries: `POST /admin/api/entries`. Covers: `PUT /admin/api/entries/{kind}/{slug}/cover` (WebP only, <= `MAX_COVER_BYTES`, enforced server-side). Covers are served publicly from `GET /covers/{kind}/{slug}.webp`.
+
 Both the admin UI and the CLI write through `POST /admin/api/entries` (`NewEntry` JSON), so validation and slug generation live in one place. Duplicates return 409.
 
 ### Metadata sources
@@ -38,11 +40,11 @@ That site keeps markdown files per entry and regenerates data and covers with a 
 ## Roadmap
 
 1. **Scaffold** (done): workspace, schema, Worker with list page and create endpoint, CLI `add`/`import`.
-2. **Cloudflare setup:** create D1 and R2 via wrangler or the Cloudflare MCP; first deploy; Access policy and service token.
-3. **Metadata providers:** TMDB search and fetch, then Open Library, then IGDB. Put these in `crates/core` (or a new crate) so the Worker and CLI share them.
-4. **Admin UI:** search, pick, prefill, set status/rating/notes, cover upload with browser-side WebP.
-5. **Covers:** R2 upload endpoint; CLI fetches upstream covers and uploads them (CLI can convert to WebP natively with the `image` crate).
-6. **Public site:** per-kind pages, filters by status, entry detail, edge caching.
+2. **Cloudflare setup** (done): D1, R2, deploy, Access policy (Allow + Service Auth) on the custom domain.
+3. **Metadata providers:** TMDB (done: search, details, poster; shared URL/parse code in `crates/core`, I/O in the CLI and Worker). Open Library next, then IGDB.
+4. **Admin UI** (first version done): TMDB search, add, browser-side WebP cover upload. Still to do: edit/delete, game/book search.
+5. **Covers** (done): CLI downloads, converts (`image` + `webp`), uploads; Worker validates and stores in R2.
+6. **Public site:** edge caching is done (Cache API, 5 min TTL; covers 24 h). Still to do: per-kind pages, status filters, entry detail.
 7. **Edit/delete** entries; ratings and consumed dates.
 
 ## Open questions

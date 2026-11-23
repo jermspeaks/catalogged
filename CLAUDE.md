@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Scaffolded (workspace, D1 schema, Worker list page + create endpoint, CLI add/import). Not yet deployed; metadata providers, admin UI, covers and public pages are still to do. See `docs/plan.md` for the roadmap and `README.md` for setup.
+Deployed at https://catalog.05152024.xyz (custom domain only; workers.dev is off). TMDB metadata and covers, edge caching, and a first admin UI exist. Open Library and IGDB providers, edit/delete, and richer public pages are still to do. See `docs/plan.md` for the roadmap and `README.md` for setup.
 
 ## Commands
 
@@ -12,7 +12,7 @@ Scaffolded (workspace, D1 schema, Worker list page + create endpoint, CLI add/im
 cargo test -p catalogged-core                      # tests (one test: cargo test -p catalogged-core slugs)
 cargo check -p catalogged-worker --target wasm32-unknown-unknown   # the worker only builds for wasm
 cargo build -p catalogged-cli                      # binary is `catalogged`
-cd crates/worker && wrangler dev                   # run locally (needs worker-build + wrangler)
+cd crates/worker && wrangler dev                   # run locally (needs worker-build, wrangler, and crates/worker/.dev.vars)
 cd crates/worker && wrangler d1 migrations apply catalogged --local
 ```
 
@@ -20,7 +20,9 @@ cd crates/worker && wrangler d1 migrations apply catalogged --local
 
 - `crates/core`: shared types (`Kind`, `Status`, `NewEntry`, ...). Keep it free of Worker/runtime deps. Enum string values (snake_case) must match the CHECK constraints in `migrations/`.
 - `crates/worker`: axum on workers-rs. D1 futures are not `Send`, so handlers use `#[worker::send]`. `wrangler.toml` lives here and points at `../../migrations`.
-- `crates/cli`: blocking reqwest client posting to `/admin/api/entries` with Cloudflare Access service-token headers.
+- `crates/cli`: blocking reqwest client posting to `/admin/api/entries` with Cloudflare Access service-token headers. It never follows redirects (an Access login redirect must be an error, not success). It calls TMDB directly with `TMDB_API_KEY` and encodes covers to WebP before uploading.
+- TMDB: URL building and JSON parsing live in `crates/core/src/tmdb.rs`; the CLI and Worker each do their own HTTP. The Worker holds `TMDB_API_KEY` as a secret for the admin search proxy.
+- Public GETs (not `/admin`) are cached with the Cache API in the `fetch` entrypoint; a response is cached only if it sets `Cache-Control`. Public changes can lag up to 5 minutes.
 - The admin UI and CLI share one write endpoint so validation lives in the Worker.
 
 ## What this is
@@ -43,4 +45,5 @@ Inspiration: https://erika.florist/catalogue/ (a local copy is at `~/projects/er
   - Books: Open Library (no key)
 - **Tooling:** bulk import/backfills should be a local Rust CLI, not Worker code. The Cloudflare MCP (https://mcp.cloudflare.com/mcp) can be used to create the D1 database and R2 bucket.
 
+- **Deploys are separate from merges.** Do not deploy or change production secrets without being asked; changes go in a PR for review first.
 - **CLI:** `catalogged add` (single) and `catalogged import <csv>` (bulk), both going through the Worker API.

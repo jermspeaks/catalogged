@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod tmdb;
+
 /// Max size of an uploaded WebP cover. Keeps R2 well inside the free tier (see docs/free-tier.md).
 pub const MAX_COVER_BYTES: usize = 300 * 1024;
 
