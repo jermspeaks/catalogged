@@ -27,7 +27,7 @@ pub fn search_url(kind: Kind, query: &str) -> Option<String> {
 }
 
 pub fn details_url(kind: Kind, id: &str) -> Option<String> {
-    Some(format!("{API}/{}/{}", path_kind(kind)?, urlencoding::encode(id)))
+    Some(format!("{API}/{}/{}?append_to_response=credits", path_kind(kind)?, urlencoding::encode(id)))
 }
 
 /// Looks up a TMDB record by IMDb id (`tt1234567`). Returns movie and tv matches.
@@ -87,6 +87,28 @@ struct Raw {
     first_air_date: Option<String>,
     poster_path: Option<String>,
     overview: Option<String>,
+    /// Only on details (`append_to_response=credits`): directors come from the crew list.
+    credits: Option<Credits>,
+    /// Only on show details.
+    #[serde(default)]
+    created_by: Vec<Person>,
+}
+
+#[derive(Deserialize)]
+struct Credits {
+    #[serde(default)]
+    crew: Vec<Person>,
+}
+
+#[derive(Deserialize)]
+struct Person {
+    name: Option<String>,
+    job: Option<String>,
+}
+
+fn names(people: impl Iterator<Item = Option<String>>) -> Option<String> {
+    let v: Vec<String> = people.flatten().filter(|n| !n.is_empty()).take(3).collect();
+    (!v.is_empty()).then(|| v.join(", "))
 }
 
 #[derive(Deserialize)]
@@ -97,6 +119,8 @@ struct Search {
 impl From<Raw> for Candidate {
     fn from(r: Raw) -> Self {
         let date = r.release_date.or(r.first_air_date).unwrap_or_default();
+        let directors = r.credits.map(|c| c.crew).unwrap_or_default().into_iter().filter(|p| p.job.as_deref() == Some("Director")).map(|p| p.name);
+        let creator = names(directors).or_else(|| names(r.created_by.into_iter().map(|p| p.name)));
         Candidate {
             id: r.id.to_string(),
             title: r.title.or(r.name).unwrap_or_default(),
@@ -104,6 +128,7 @@ impl From<Raw> for Candidate {
             cover_url: r.poster_path.as_deref().filter(|p| !p.is_empty()).map(poster_url),
             thumb_url: r.poster_path.as_deref().filter(|p| !p.is_empty()).map(thumb_url),
             overview: r.overview.filter(|o| !o.is_empty()),
+            creator,
         }
     }
 }
@@ -119,6 +144,16 @@ pub fn parse_details(json: &str) -> Result<Candidate, serde_json::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directors_and_show_creators() {
+        let m = parse_details(r#"{"id":1,"title":"M","credits":{"crew":[{"name":"Editor Person","job":"Editor"},{"name":"Lana Wachowski","job":"Director"},{"name":"Lilly Wachowski","job":"Director"}]}}"#).unwrap();
+        assert_eq!(m.creator.as_deref(), Some("Lana Wachowski, Lilly Wachowski"));
+        let t = parse_details(r#"{"id":2,"name":"S","created_by":[{"name":"Vince Gilligan"}]}"#).unwrap();
+        assert_eq!(t.creator.as_deref(), Some("Vince Gilligan"));
+        assert!(parse_details(r#"{"id":3,"title":"Search hit"}"#).unwrap().creator.is_none());
+        assert!(details_url(Kind::Movie, "603").unwrap().ends_with("append_to_response=credits"));
+    }
 
     #[test]
     fn parses_movie_and_show() {

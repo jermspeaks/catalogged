@@ -72,7 +72,7 @@ const sorts={
  year:(a,b)=>(b.year||0)-(a.year||0),
  rating:(a,b)=>(b.rating||0)-(a.rating||0)};
 fetch('/index.json').then(r=>r.ok?r.json():Promise.reject(r.status)).then(d=>{
- const items=d.items.map(a=>({kind:a[0],slug:a[1],title:a[2],status:a[3],rating:a[4],year:a[5],cover:a[6],date:a[7],upd:a[8],lc:a[2].toLowerCase()}));
+ const items=d.items.map(a=>({kind:a[0],slug:a[1],title:a[2],status:a[3],rating:a[4],year:a[5],cover:a[6],date:a[7],upd:a[8],lc:(a[2]+' '+(a[9]||'')).toLowerCase()}));
  const f=$('#controls'), q=f.q, kind=f.kind, status=f.status, sort=f.sort;
  const p=new URLSearchParams(location.search);
  q.value=p.get('q')||''; kind.value=p.get('kind')||''; status.value=p.get('status')||''; sort.value=sorts[p.get('sort')]?p.get('sort'):'recent';

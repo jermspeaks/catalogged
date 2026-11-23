@@ -105,3 +105,12 @@ test('entries without a cover show a placeholder (server-rendered list, grid and
   const html = await (await request.get('/?kind=game')).text();
   expect(html).toContain('class="ph"'); // present without JavaScript too
 });
+
+test('search matches the creator as well as the title, and the detail page shows it', async ({ page, request }) => {
+  const slug = await seed(request, { kind: 'book', title: 'Zzcreator Book', creator: 'Octavia Butler' });
+  await page.goto('/');
+  await page.locator('#controls input[name=q]').fill('butler');
+  await expect(page.locator('#grid li', { hasText: 'Zzcreator Book' })).toHaveCount(1);
+  await page.goto(`/entry/book/${slug}`);
+  await expect(page.locator('body')).toContainText('Octavia Butler');
+});

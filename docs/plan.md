@@ -1,6 +1,6 @@
 # Plan
 
-What is built lives in [completed.md](completed.md). This file is what remains, in priority order, plus the decisions that shape it. The free-tier rules in [free-tier.md](free-tier.md) apply to every item. Last reviewed: 2026-11-23, after the edit page polish.
+What is built lives in [completed.md](completed.md). This file is what remains, in priority order, plus the decisions that shape it. The free-tier rules in [free-tier.md](free-tier.md) apply to every item. Last reviewed: 2026-11-23, after the creator field and matching work.
 
 ## Goals
 
@@ -18,7 +18,7 @@ What is built lives in [completed.md](completed.md). This file is what remains, 
 | Images | R2 (public bucket on `covers.05152024.xyz`), WebP | Converted in the browser (admin) or in the CLI; the Worker never encodes |
 | Auth | Cloudflare Access on `/admin*`, plus JWT verification in the Worker | Browser: Access login. CLI: service-token headers |
 | Caching | Cache API for public pages, purged per data centre on admin writes | Keeps D1 reads near zero |
-| Metadata | TMDB (movies, shows), Open Library (books), IGDB (games) | Lookups in the CLI and the admin search; matching in `crates/core` |
+| Metadata | TMDB (movies, shows), Open Library (books), IGDB (games) | Lookups in the CLI and the admin search; matching in `crates/core`. Providers also supply the creator (director, author, developer) |
 
 ## Standing decisions
 
@@ -30,30 +30,33 @@ What is built lives in [completed.md](completed.md). This file is what remains, 
 
 ## Priorities
 
-Ordered by value for the owner's actual goal (a complete, good-looking catalogue) against effort. The edit page polish (layout, toasts and loading states, id fill on cover pick, placeholder image) is done and recorded in completed.md. Sizes: S under half a day, M about a day, L more. Reorder freely.
+Ordered by value for the owner's actual goal (a complete, good-looking catalogue) against effort. Sizes: S under half a day, M about a day, L more. Reorder freely.
 
 ### P1. Import the rest of the log (M)
 The 2010 sheet is in; 2011 to 2026 are not. The owner's log lives in `~/projects/jermspeaks.github.io/src/content/log/` (one markdown file per year, with books, movies, some games and shows; later years carry TMDB links and Letterboxd links).
-- Move the log-to-CSV generator into the repo (it is a throwaway script in `/tmp` today) and extend it to every year's formats (links, `🔁` rewatch marks, `🎮`/`📺` lines with year ranges, season numbers).
-- Run `match`, review, then `import` year by year (dry run, 10 rows, the rest with `--skip-existing`; `scripts/backup.sh` first). Mind the D1 write budget: 5,000 entries is about half of one day's writes; import a year or two per run.
-- Dependency: P2 makes the review step much less painful. P3 should follow the first large import. The edit page polish (done) makes fixing leftovers by hand quicker.
+- Move the log-to-CSV generator into the repo (it is a throwaway script in `/tmp` today) and extend it to every year's formats (links, `🔁` rewatch marks, `🎮`/`📺` lines with year ranges, season numbers). Output an `author` column for books (`creator` is accepted too).
+- Per year: generate, `match --interactive` (sure matches are filled in without asking), `import --dry-run`, 10 rows for real, then the rest with `--skip-existing`; `scripts/backup.sh` first. Mind the D1 write budget: 5,000 entries is about half of one day's writes; import a year or two per run.
+- Starting with 2011.
 
-### P2. Better matching, with a creator field (S to M)
-About half the 2010 rows came back `none` or `check`. Causes seen: misspelt titles ("Momento"), subtitles or part numbers ("Red Cliff: Part 1", "The Godfather: Part I"), a leading "The", "&" versus "and", and books with no year or author on file.
-- Fuzzy title matching in `crates/core/src/matching.rs` (token overlap or edit distance, with a threshold; anything fuzzy is always `check`, never `high`).
-- Store a generic **creator** on every entry (author, director or studio; decided 2026-11-23) so books can be matched by author and the field can be shown on the entry. Needs a migration (`creator TEXT`), the field in the entry/edit APIs and edit page, `creator` and the old `author` column accepted in CSV import, and providers filling it (Open Library authors, TMDB director, IGDB developer).
-- Interactive review: print each `check`/`none` row with candidates and let the owner pick by number, instead of hand-editing the CSV.
+### P2. Identify (M)
+New idea from the owner (2026-11-23): replace the cover finder with an **identify** action that grabs all metadata from the provider and the cover, including the title.
+- Edit page: search a provider, pick a record, and apply its title, year, creator, provider id and cover in one step (today Find a cover sets the cover, and fills the id, year and creator only if they are empty).
+- CLI: `catalogged covers` grows into (or is joined by) `identify`, which also corrects titles from the provider's spelling. Needs a decision on whether the provider's title should overwrite a hand-typed one (the slug never changes either way).
+- Pairs with P1: after each import the leftovers are the rows that did not match, and this is the fast way to fix them by hand.
 
-### P3. Measure at scale (S, after a big import)
-Nothing has been measured above 79 entries. Before approaching 5,000: size and CPU time of `/index.json`, D1 rows read per day, R2 operations (see the monitoring checklist in [operations.md](operations.md)). If `/index.json` is too heavy, options are trimming fields, paging it, or FTS5 on D1 (unverified).
+### P3. Default public sort is date logged (S)
+New idea from the owner (2026-11-23). The grid defaults to "recent" (last updated). Make "date logged" the default: the sort control, the order of `/index.json` (it is `updated_at DESC` today), and the server-rendered first page. Entries without a date sort last.
 
-### P4. Warn before adding a duplicate (S)
+### P4. Measure at scale (S, after a big import)
+Nothing has been measured above 79 entries. Before approaching 5,000: size and CPU time of `/index.json` (it now carries the creator too), D1 rows read per day, R2 operations (see the monitoring checklist in [operations.md](operations.md)). If `/index.json` is too heavy, options are trimming fields, paging it, or FTS5 on D1 (unverified).
+
+### P5. Warn before adding a duplicate (S)
 The database already rejects duplicates (409). In the admin search results, mark titles already in the catalogue ("in catalogue", linking to its edit page) and disable Add, instead of failing after the click. Needs the existing list (`/index.json`) loaded on the admin page.
 
-### P5. Public site (M, as wanted)
-Per-kind and per-status counts; richer detail pages (year, source link, provider overview); lazy cover sizing. Optional until the catalogue is populated, since the grid is the main surface.
+### P6. Public site (M, as wanted)
+Per-kind and per-status counts; richer detail pages (year, source link, provider overview); lazy cover sizing; show the creator on grid cards. Optional until the catalogue is populated, since the grid is the main surface.
 
-### P6. Housekeeping (S each)
+### P7. Housekeeping (S each)
 - GitHub Action running the e2e suite on pull requests (none exists; run `npm test` in `e2e/` before merging Worker or UI changes today).
 - PNG and apple-touch icons (the favicon and manifest use an SVG only).
 - Test the manual-cover path of `scripts/backup.sh` once a manually uploaded cover exists.
@@ -64,5 +67,5 @@ Per-kind and per-status counts; richer detail pages (year, source link, provider
 
 - Cache purges clear one data centre; other locations lag up to the TTL (5 min; 15 for `/index.json`). Later pages of the no-JS list are never purged.
 - IGDB unreleased games can carry placeholder release years.
-- `match` and `covers` need an exact normalised title; everything else is listed for a human.
+- `match` and `covers` only auto-accept an exact normalised title (case, punctuation, `&`, a leading article and `Part N` ignored). Subtitle and typo matches are suggestions that need a human (`match --interactive`).
 - Open Library work records often lack a publish year, so a year can be blank.

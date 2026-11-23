@@ -81,7 +81,7 @@ async function doSearch() {
       li.append(img);
     }
     const label = document.createElement('span');
-    label.textContent = ` ${c.title}${c.year ? ` (${c.year})` : ''} `;
+    label.textContent = ` ${c.title}${c.year ? ` (${c.year})` : ''}${c.creator ? ` · ${c.creator}` : ''} `;
     const btn = document.createElement('button');
     btn.textContent = 'Add';
     btn.onclick = () => add(kind, c, btn);
@@ -106,7 +106,7 @@ async function add(kind, c, btn) {
   if (btn) btn.disabled = true;
   let slug;
   try {
-    slug = await create({ kind, title: c.title, year: c.year, source: SOURCE[kind], external_id: c.id, ...defaults() });
+    slug = await create({ kind, title: c.title, year: c.year, creator: c.creator, source: SOURCE[kind], external_id: c.id, ...defaults() });
   } catch (e) { msg(`Add failed: ${e.message}`); if (btn) btn.disabled = false; return; }
   if (c.cover_url) {
     try { await putCover(kind, slug, c.cover_url); }
@@ -135,7 +135,7 @@ $('#manual').addEventListener('submit', async (ev) => {
   const f = ev.target, kind = f.elements.kind.value, title = f.elements.title.value.trim();
   const year = f.elements.year.value.trim();
   let slug;
-  try { slug = await create({ kind, title, year: year ? Number(year) : null, ...defaults() }); }
+  try { slug = await create({ kind, title, year: year ? Number(year) : null, creator: f.elements.creator.value.trim() || null, ...defaults() }); }
   catch (e) { msg(`Add failed: ${e.message}`); return; }
   const file = f.elements.cover.files[0];
   if (file) {
@@ -159,7 +159,7 @@ async function save() {
     method: 'PUT', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ title: form.elements.title.value.trim(), status: form.elements.status.value,
       rating: rating && Number(rating), year: year && Number(year), consumed_at: val('consumed_at'), review: val('review'),
-      source: val('external_id') && SOURCE[kind], external_id: val('external_id') }),
+      source: val('external_id') && SOURCE[kind], external_id: val('external_id'), creator: val('creator') }),
   });
   msg(r.ok ? 'Saved ✓ (public pages update right away here; other locations catch up within minutes)' : `Failed: ${r.status} ${(await r.text()).slice(0, 120)}`);
 }
@@ -199,7 +199,11 @@ async function coverSearch() {
       await setCover(c.cover_url);
       // Picking the record is also saying which record this is: fill the provider id (and year) in the form.
       const f = form.elements;
-      if (!f.external_id.value.trim()) { f.external_id.value = c.id; if (!f.year.value && c.year) f.year.value = c.year; msg('Cover updated ✓ and the provider id filled in: press Save to keep it', 'ok'); }
+      if (!f.external_id.value.trim()) {
+        f.external_id.value = c.id; if (!f.year.value && c.year) f.year.value = c.year;
+        if (!f.creator.value.trim() && c.creator) f.creator.value = c.creator;
+        msg('Cover updated ✓ and the provider id filled in: press Save to keep it', 'ok');
+      }
     };
     li.append(label, btn); ul.append(li);
   }
@@ -279,6 +283,7 @@ pub fn page(entries: &[Entry], page: u32, more: bool, q: &str) -> Markup {
                 label { "Kind " select name="kind" { (kinds()) } }
                 label { "Title " input name="title" required; }
                 label { "Year " input name="year" type="number"; }
+                label { "Author / director / developer (optional) " input name="creator"; }
                 label { "Cover image (optional) " input name="cover" type="file" accept="image/*"; }
                 button type="submit" { "Add" }
             }
@@ -303,6 +308,15 @@ pub fn page(entries: &[Entry], page: u32, more: bool, q: &str) -> Markup {
             @if more { a href={"/admin?page=" (page + 1) @if !q.is_empty() { "&q=" (q) }} { "older →" } }
         }
     }, ADMIN_JS)
+}
+
+fn creator_label(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Movie => "Director",
+        Kind::Show => "Creator",
+        Kind::Book => "Author",
+        Kind::Game => "Developer",
+    }
 }
 
 fn provider_name(kind: Kind) -> &'static str {
@@ -354,6 +368,7 @@ pub fn edit_page(e: &Entry, cover_url: Option<String>) -> Markup {
                 label { "Date logged " input name="consumed_at" type="date" value=(e.consumed_at.clone().unwrap_or_default()); }
                 label { "Rating (1-10) " input name="rating" type="number" min="1" max="10" value=(e.rating.map(|r| r.to_string()).unwrap_or_default()); }
                 label { "Year " input name="year" type="number" value=(e.year.map(|y| y.to_string()).unwrap_or_default()); }
+                label.wide { (creator_label(e.kind)) " " input name="creator" value=(e.creator.clone().unwrap_or_default()) placeholder="optional"; }
                 label.wide { (provider_name(e.kind)) " id " input name="external_id" value=(e.external_id.clone().unwrap_or_default()) placeholder="optional, e.g. a TMDB id"; }
                 label.wide { "Review " textarea name="review" rows="8" { (e.review.clone().unwrap_or_default()) } }
             }

@@ -34,7 +34,7 @@ export function fakeWebp(extra = 16): Buffer {
   return Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), Buffer.alloc(extra)]);
 }
 
-export type Seed = { kind: string; title: string; status?: string; rating?: number; year?: number; review?: string; consumed_at?: string };
+export type Seed = { kind: string; title: string; status?: string; rating?: number; year?: number; review?: string; consumed_at?: string; creator?: string };
 
 export async function seed(request: APIRequestContext, e: Seed): Promise<string> {
   const r = await request.post('/admin/api/entries', { data: { status: 'consumed', ...e } });

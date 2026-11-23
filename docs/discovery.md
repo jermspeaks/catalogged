@@ -4,4 +4,4 @@ Ideas and reference material. Every idea here has been triaged (2026-11-23): fin
 
 ## New ideas
 
-_None open._
+_None open._ (Triaged 2026-11-23: "identify" and the default sort by date logged are P2 and P3 in plan.md.)
