@@ -190,7 +190,7 @@ fn layout(title: &str, body: Markup) -> Markup {
 
 
 const COLS: &str =
-    "id, kind, slug, title, status, rating, review, year, source, external_id, cover_key, consumed_at";
+    "id, kind, slug, title, status, rating, review, year, source, external_id, creator, cover_key, consumed_at";
 const PAGE_SIZE: u32 = 60;
 const MAX_PAGE: u32 = 200;
 
@@ -243,7 +243,7 @@ struct ListQuery {
 /// the whole table once, so this bounds the D1 read cost (~5k rows per miss).
 #[worker::send]
 async fn index_json(State(state): State<AppState>) -> AxumResponse {
-    let q = "SELECT json_group_array(json(a)) AS j FROM (SELECT json_array(kind, slug, title, status, rating, year, cover_key, consumed_at, updated_at) AS a FROM entries ORDER BY updated_at DESC)";
+    let q = "SELECT json_group_array(json(a)) AS j FROM (SELECT json_array(kind, slug, title, status, rating, year, cover_key, consumed_at, updated_at, creator) AS a FROM entries ORDER BY updated_at DESC)";
     let row = async {
         state.env.d1("DB")?.prepare(q).first::<serde_json::Value>(None).await
     }
@@ -339,6 +339,7 @@ async fn entry_page(State(state): State<AppState>, Path((kind, slug)): Path<(Str
         html! {
             header.top { p { a href="/" { "← all" } } (public_ui::theme_picker()) }
             h1 { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
+            @if let Some(c) = &e.creator { p { (c) } }
             p { small { a href={"/admin/edit/" (e.kind.as_str()) "/" (e.slug)} { "Edit" } } }
             @if let Some(key) = &e.cover_key { img.cover src=(cover_src(&e_env, key)) alt="" width="300" height="450"; } @else { div.cover.ph {} }
             p {
@@ -469,7 +470,7 @@ async fn edit_entry(
         .map_err(internal)?
         .prepare(
             "UPDATE entries SET title = ?1, status = ?2, rating = ?3, review = ?4, year = ?5, consumed_at = ?6, \
-             source = ?7, external_id = ?8, updated_at = datetime('now') WHERE kind = ?9 AND slug = ?10",
+             source = ?7, external_id = ?8, creator = ?9, updated_at = datetime('now') WHERE kind = ?10 AND slug = ?11",
         )
         .bind(&[
             edit.title.trim().into(),
@@ -480,6 +481,7 @@ async fn edit_entry(
             opt(edit.consumed_at.filter(|d| !d.is_empty())),
             opt(edit.source.map(|s| s.as_str())),
             opt(edit.external_id.map(|i| i.trim().to_owned())),
+            opt(edit.creator.map(|c| c.trim().to_owned()).filter(|c| !c.is_empty())),
             kind.clone().into(),
             slug.clone().into(),
         ])
@@ -620,8 +622,8 @@ async fn create_entry(
         .and_then(|s| serde_json::to_value(s).ok())
         .and_then(|v| v.as_str().map(String::from));
     db.prepare(
-        "INSERT INTO entries (kind, slug, title, status, rating, review, year, source, external_id, consumed_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO entries (kind, slug, title, status, rating, review, year, source, external_id, consumed_at, creator) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )
     .bind(&[
         new.kind.as_str().into(),
@@ -634,6 +636,7 @@ async fn create_entry(
         opt(source),
         opt(new.external_id),
         opt(new.consumed_at),
+        opt(new.creator.map(|c| c.trim().to_owned()).filter(|c| !c.is_empty())),
     ])
     .map_err(internal)?
     .run()

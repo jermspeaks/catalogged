@@ -102,14 +102,14 @@ test('search and add (provider mocked): entry gets provider ids and a converted 
 
 test('add by id (provider mocked): uses the kind the lookup returns', async ({ page, request }) => {
   await page.route('**/admin/api/lookup*', (r) =>
-    r.fulfill({ json: { kind: 'show', id: '1396', title: 'E2E Lookup Show', year: 2008, cover_url: null, thumb_url: null, overview: null } }));
+    r.fulfill({ json: { kind: 'show', id: '1396', title: 'E2E Lookup Show', year: 2008, cover_url: null, thumb_url: null, overview: null, creator: 'Vince Gilligan' } }));
   await page.goto('/admin');
   await page.locator('summary', { hasText: 'Add by id' }).click();
   await page.selectOption('#idkind', 'movie'); // the lookup says it is really a show
   await page.fill('#extid', 'tt0903747');
   await page.getByRole('button', { name: 'Look up and add' }).click();
   await expect(page.locator('#msg')).toContainText('Added "E2E Lookup Show"');
-  expect((await entry(request, 'show', 'e2e-lookup-show')).body).toMatchObject({ source: 'tmdb', external_id: '1396' });
+  expect((await entry(request, 'show', 'e2e-lookup-show')).body).toMatchObject({ source: 'tmdb', external_id: '1396', creator: 'Vince Gilligan' }); // the provider's creator is stored
 });
 
 test('adding a duplicate reports the error', async ({ page, request }) => {
@@ -202,4 +202,38 @@ test('edit page: placeholder without a cover, toast and busy state while saving'
   await page.evaluate(() => (document.querySelector('input[name=rating]') as HTMLInputElement).removeAttribute('max'));
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('#msg')).toHaveClass(/err/); // failures are styled, not just text
+});
+
+test('creator: shown and saved on the edit page, kind-specific label, manual add, and filled from a cover pick', async ({ page, request }) => {
+  const slug = await seed(request, { kind: 'book', title: 'E2E Creator Book', creator: 'Old Author' });
+  await page.goto(`/admin/edit/book/${slug}`);
+  await expect(page.getByLabel('Author')).toHaveValue('Old Author');
+  await page.getByLabel('Author').fill('Ursula K. Le Guin');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('#msg')).toContainText('Saved');
+  expect((await entry(request, 'book', slug)).body.creator).toBe('Ursula K. Le Guin');
+  await page.getByLabel('Author').fill('');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('#msg')).toContainText('Saved');
+  expect((await entry(request, 'book', slug)).body.creator).toBeNull(); // cleared
+
+  const g = await seed(request, { kind: 'game', title: 'E2E Creator Game' });
+  await page.goto(`/admin/edit/game/${g}`);
+  await expect(page.getByLabel('Developer')).toBeVisible();
+  await page.route('**/mock-poster.png', (r) => r.fulfill({ contentType: 'image/png', body: png(100, 150) }));
+  await page.route('**/admin/api/search*', (r) =>
+    r.fulfill({ json: [{ id: '113112', title: 'E2E Creator Game', year: 2020, cover_url: 'http://localhost:8788/mock-poster.png', thumb_url: null, overview: null, creator: 'Supergiant Games' }] }));
+  await page.locator('summary', { hasText: 'Find a cover' }).click();
+  await page.locator('#coversearch').getByRole('button', { name: 'Search' }).click();
+  await page.getByRole('button', { name: 'Use this cover' }).click();
+  await expect(page.getByLabel('Developer')).toHaveValue('Supergiant Games');
+
+  await page.goto('/admin');
+  await page.locator('summary', { hasText: 'Add manually' }).click();
+  await page.locator('#manual select[name=kind]').selectOption('movie');
+  await page.fill('#manual input[name=title]', 'E2E Manual Creator');
+  await page.fill('#manual input[name=creator]', 'Some Director');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(page.locator('#msg')).toContainText('Added "E2E Manual Creator"');
+  expect((await entry(request, 'movie', 'e2e-manual-creator')).body.creator).toBe('Some Director');
 });

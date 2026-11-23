@@ -8,7 +8,7 @@ _Last reviewed: 2026-11-23, after PR #16._
 
 | Area | State |
 |---|---|
-| Code on `main` | Everything below, through PR #16 |
+| Code on `main` | Everything below, through PR #18 (the creator work is in the next PR) |
 | Production | Deployed from `main` (PR #16) at https://catalog.05152024.xyz; `workers.dev` and preview URLs are off. All migrations applied |
 | Data | The 2010 log is imported (75 entries); 79 entries in total, about 44 with covers and 42 with a provider id. Later years not yet imported |
 | Infrastructure | D1 `catalogged`, R2 `catalogged-covers`, Worker `catalogged`, Access in front of `/admin`, billing alert set, Workers Free plan |
@@ -69,6 +69,12 @@ _Last reviewed: 2026-11-23, after PR #16._
 - Edit page: cover column beside a two-column field grid (stacks on narrow screens); toast messages with a spinner while working (errors styled, successes auto-hide) and buttons disabled while a save, search or upload runs.
 - Find a cover fills the provider id and year when the entry has none (press Save to keep them).
 - Placeholder image (an SVG in the palette, no R2 cost) for entries without a cover: server-rendered list, script grid, detail page and edit page.
+
+### Creator field and better matching
+- Migration `0003`: `entries.creator` (author, director or creator, developer). Providers fill it: Open Library authors (details now come from a key search), TMDB directors (`append_to_response=credits`; show creators for TV), IGDB developers. It is in the create and edit APIs, the edit page (labelled Author / Director / Creator / Developer by kind), manual add, the public detail page and public search (`/index.json` carries it).
+- Matching (`crates/core/src/matching.rs`): case, punctuation, `&`, a leading article, `Part N` and roman numerals are ignored for an exact match; a title that matches up to a subtitle, or within a typo, is only ever a suggestion; the creator breaks ties between same-titled books and demotes a mismatch; a unique title with no year to compare counts as sure only if the matched record has a year. Records released after the year the entry was logged are ignored.
+- CLI: `match` fills creator, accepts `author` or `creator`, and has `--interactive` (numbered candidates, Enter accepts the suggestion, `s` skips, `q` quits keeping the rows done); `covers --creators` backfills creators for entries that already have a provider id; `add`/`edit --creator`.
+- On the real 2010 sheet: 49 sure matches, 19 to check and 7 with no match, out of 75 (before: 41, 18 and 16).
 
 ## Discovery items done (triaged 2026-11-23)
 

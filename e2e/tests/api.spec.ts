@@ -110,3 +110,19 @@ test('writes clear the cached public pages (cache on, as in production)', async 
   expect((await request.get(`/entry/show/${slug}`)).status()).toBe(404);
   expect(await home()).not.toContain('E2E Purged');
 });
+
+test('creator: stored on create (author alias too), trimmed, replaced by PUT, length-limited', async ({ request }) => {
+  const a = await request.post('/admin/api/entries', { data: { kind: 'book', title: 'E2E Creator A', status: 'consumed', creator: '  Jane Doe  ' } });
+  expect(a.status()).toBe(200);
+  expect((await entry(request, 'book', 'e2e-creator-a')).body.creator).toBe('Jane Doe');
+  const b = await request.post('/admin/api/entries', { data: { kind: 'book', title: 'E2E Creator B', status: 'consumed', author: 'John Roe' } });
+  expect(b.status()).toBe(200);
+  expect((await entry(request, 'book', 'e2e-creator-b')).body.creator).toBe('John Roe');
+
+  const put = (creator: unknown) => request.put('/admin/api/entries/book/e2e-creator-a', { data: { title: 'E2E Creator A', status: 'consumed', creator } });
+  expect((await put('Someone Else')).status()).toBe(200);
+  expect((await entry(request, 'book', 'e2e-creator-a')).body.creator).toBe('Someone Else');
+  expect((await put('x'.repeat(201))).status()).toBe(400);
+  expect((await put(null)).status()).toBe(200);
+  expect((await entry(request, 'book', 'e2e-creator-a')).body.creator).toBeNull();
+});

@@ -91,6 +91,9 @@ pub struct Entry {
     pub year: Option<i32>,
     pub source: Option<Source>,
     pub external_id: Option<String>,
+    /// Author (book), director or creator (movie, show) or developer (game).
+    #[serde(default)]
+    pub creator: Option<String>,
     /// R2 object key of the WebP cover.
     pub cover_key: Option<String>,
     /// Date logged / watched / read / played, `YYYY-MM-DD`.
@@ -110,6 +113,9 @@ pub struct NewEntry {
     pub year: Option<i32>,
     pub source: Option<Source>,
     pub external_id: Option<String>,
+    /// Also accepted as `author` in CSV/JSON input.
+    #[serde(default, alias = "author")]
+    pub creator: Option<String>,
     #[serde(default)]
     pub consumed_at: Option<String>,
 }
@@ -124,6 +130,9 @@ pub struct Candidate {
     pub cover_url: Option<String>,
     pub thumb_url: Option<String>,
     pub overview: Option<String>,
+    /// Author, director/creator or developer, when the provider has it (TMDB search results do not).
+    #[serde(default)]
+    pub creator: Option<String>,
 }
 
 /// Payload for replacing an entry's editable fields. The slug never changes.
@@ -141,9 +150,12 @@ pub struct EditEntry {
     pub source: Option<Source>,
     #[serde(default)]
     pub external_id: Option<String>,
+    #[serde(default)]
+    pub creator: Option<String>,
 }
 
 pub const MAX_REVIEW_CHARS: usize = 20_000;
+pub const MAX_CREATOR_CHARS: usize = 200;
 
 /// `YYYY-MM-DD` with a plausible month and day.
 pub fn valid_date(s: &str) -> bool {
@@ -155,7 +167,10 @@ pub fn valid_date(s: &str) -> bool {
     matches!((num(0..4), num(5..7), num(8..10)), (Some(y), Some(m), Some(d)) if y >= 1000 && (1..=12).contains(&m) && (1..=31).contains(&d))
 }
 
-fn validate_fields(title: &str, rating: Option<u8>, review: &Option<String>, date: &Option<String>) -> Result<(), String> {
+fn validate_fields(title: &str, rating: Option<u8>, review: &Option<String>, date: &Option<String>, creator: &Option<String>) -> Result<(), String> {
+    if creator.as_deref().is_some_and(|c| c.chars().count() > MAX_CREATOR_CHARS) {
+        return Err(format!("creator exceeds {MAX_CREATOR_CHARS} characters"));
+    }
     if slugify(title).is_empty() && title.trim().is_empty() {
         return Err("title is required".into());
     }
@@ -173,13 +188,13 @@ fn validate_fields(title: &str, rating: Option<u8>, review: &Option<String>, dat
 
 impl NewEntry {
     pub fn validate(&self) -> Result<(), String> {
-        validate_fields(&self.title, self.rating, &self.review, &self.consumed_at)
+        validate_fields(&self.title, self.rating, &self.review, &self.consumed_at, &self.creator)
     }
 }
 
 impl EditEntry {
     pub fn validate(&self) -> Result<(), String> {
-        validate_fields(&self.title, self.rating, &self.review, &self.consumed_at)?;
+        validate_fields(&self.title, self.rating, &self.review, &self.consumed_at, &self.creator)?;
         match (self.source, self.external_id.as_deref().map(str::trim)) {
             (None, None) => Ok(()),
             (Some(_), Some(id)) if !id.is_empty() && id.len() <= 64 && !id.contains(char::is_whitespace) => Ok(()),
@@ -217,7 +232,7 @@ pub fn slugify(title: &str) -> String {
 mod tests {
     #[test]
     fn edit_provider_id_rules() {
-        let mk = |source, id: Option<&str>| EditEntry { title: "T".into(), status: Status::Consumed, rating: None, review: None, year: None, consumed_at: None, source, external_id: id.map(Into::into) };
+        let mk = |source, id: Option<&str>| EditEntry { title: "T".into(), status: Status::Consumed, rating: None, review: None, year: None, consumed_at: None, source, external_id: id.map(Into::into), creator: None };
         assert!(mk(None, None).validate().is_ok());
         assert!(mk(Some(Source::Tmdb), Some("603")).validate_for(Kind::Movie).is_ok());
         assert!(mk(Some(Source::Tmdb), None).validate().is_err());
@@ -232,7 +247,7 @@ mod tests {
     fn dates_and_validation() {
         assert!(valid_date("2026-11-23"));
         assert!(!valid_date("2026-13-01") && !valid_date("26-11-23") && !valid_date("2026/11/23"));
-        let mut e = EditEntry { title: "x".into(), status: Status::Consumed, rating: Some(11), review: None, year: None, consumed_at: None, source: None, external_id: None };
+        let mut e = EditEntry { title: "x".into(), status: Status::Consumed, rating: Some(11), review: None, year: None, consumed_at: None, source: None, external_id: None, creator: None };
         assert!(e.validate().is_err());
         e.rating = Some(10);
         e.consumed_at = Some("2026-02-30x".into());

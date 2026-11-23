@@ -57,6 +57,9 @@ enum Cmd {
         source: Option<String>,
         #[arg(long)]
         external_id: Option<String>,
+        /// Author, director or developer (filled from the provider when --external-id is given)
+        #[arg(long)]
+        creator: Option<String>,
         /// Skip fetching and uploading the cover
         #[arg(long)]
         no_cover: bool,
@@ -82,6 +85,9 @@ enum Cmd {
         /// Provider id (TMDB id, Open Library work id or IGDB id; the provider follows from the kind). Empty string clears it
         #[arg(long)]
         external_id: Option<String>,
+        /// Author, director or developer. Empty string clears it
+        #[arg(long)]
+        creator: Option<String>,
     },
     /// Delete an entry (and its cover)
     Delete {
@@ -135,12 +141,21 @@ enum Cmd {
         /// Don't touch covers: store the provider id on entries that have none, including ones that already have a cover
         #[arg(long)]
         ids_only: bool,
+        /// Don't search: for entries that already have a provider id but no creator, fetch the creator (author, director, developer) from the provider
+        #[arg(long, conflicts_with = "ids_only")]
+        creators: bool,
     },
     /// Find provider ids for rows that have none: searches TMDB / Open Library / IGDB by title (and
     /// author for books) and writes a new CSV with source, external_id and year filled in, plus
     /// match (high | check | none), match_title and candidates columns to review before `import`.
     /// Rows that already have an external_id pass through unchanged. Nothing is sent to the Worker.
-    Match { input: PathBuf, output: PathBuf },
+    Match {
+        input: PathBuf,
+        output: PathBuf,
+        /// Ask about every row that is not a sure match: pick a candidate by number, accept the suggestion with Enter, skip, or quit (rows done so far are kept)
+        #[arg(long, short)]
+        interactive: bool,
+    },
 }
 
 fn today_if_consumed(status: Status) -> Option<String> {
@@ -179,6 +194,9 @@ struct Row {
     external_id: Option<String>,
     #[serde(default)]
     consumed_at: Option<String>,
+    /// Author, director or developer; `author` is accepted as an alias.
+    #[serde(default, alias = "author")]
+    creator: Option<String>,
 }
 
 struct Client {
@@ -406,6 +424,7 @@ fn enrich(meta: &Meta, e: &mut NewEntry) -> Result<Option<String>> {
         e.title = found.title;
     }
     e.year = e.year.or(found.year);
+    e.creator = e.creator.take().or(found.creator);
     Ok(found.cover_url)
 }
 
@@ -451,6 +470,7 @@ fn resolve_row(meta: &Meta, row: Row) -> Result<NewEntry> {
         year,
         source,
         external_id,
+        creator: row.creator.map(|c| c.trim().to_owned()).filter(|c| !c.is_empty()),
         consumed_at: row.consumed_at.filter(|d| !d.is_empty()),
     })
 }
@@ -467,10 +487,66 @@ fn add_one(client: &Client, meta: &Meta, mut e: NewEntry, covers: bool) -> Resul
     Ok(e.title)
 }
 
+/// You can't have consumed something before it came out: drop records dated after the year it was
+/// logged (a 2010 entry is not the 2025 remake). Allows one year of slack for regional release dates.
+fn released_by(found: Vec<Candidate>, logged: Option<&str>) -> Vec<Candidate> {
+    match logged.and_then(|d| d.get(..4)).and_then(|y| y.parse::<i32>().ok()) {
+        Some(ly) => found.into_iter().filter(|c| c.year.is_none_or(|cy| cy <= ly + 1)).collect(),
+        None => found,
+    }
+}
+
+/// What the owner decided for one uncertain row in `match --interactive`.
+enum Choice {
+    Pick(usize),
+    Skip,
+    Quit,
+}
+
+fn describe(c: &Candidate) -> String {
+    format!("{}{}{}", c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default(), c.creator.as_ref().map(|a| format!("  by {a}")).unwrap_or_default())
+}
+
+/// Show the candidates for a row and read the answer from stdin.
+fn ask(title: &str, year: Option<i32>, creator: &str, found: &[Candidate], suggested: Option<usize>, conf: matching::Confidence) -> Result<Choice> {
+    use std::io::Write;
+    println!("\n? {title}{}{}   [{}]", year.map(|y| format!(" ({y})")).unwrap_or_default(), if creator.is_empty() { String::new() } else { format!("  by {creator}") }, conf.as_str());
+    if found.is_empty() {
+        println!("  (no results)");
+        return Ok(Choice::Skip);
+    }
+    for (i, c) in found.iter().take(6).enumerate() {
+        println!("  {}) {}{}", i + 1, describe(c), if suggested == Some(i) { "   <- suggested" } else { "" });
+    }
+    loop {
+        print!("  number, Enter = {}, s = skip, q = quit: ", if suggested.is_some() { "accept suggestion" } else { "skip" });
+        std::io::stdout().flush()?;
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line)? == 0 {
+            return Ok(Choice::Quit);
+        }
+        match line.trim() {
+            "" => return Ok(suggested.map_or(Choice::Skip, Choice::Pick)),
+            "s" => return Ok(Choice::Skip),
+            "q" => return Ok(Choice::Quit),
+            n => match n.parse::<usize>() {
+                Ok(i) if (1..=found.len().min(6)).contains(&i) => return Ok(Choice::Pick(i - 1)),
+                _ => println!("  not a choice"),
+            },
+        }
+    }
+}
+
 /// Search each id-less row and write the review CSV (see `Cmd::Match`).
-fn match_csv(meta: &Meta, input: &PathBuf, output: &PathBuf) -> Result<()> {
+fn match_csv(meta: &Meta, input: &PathBuf, output: &PathBuf, interactive: bool) -> Result<()> {
     let mut rdr = csv::Reader::from_path(input)?;
     let mut headers: Vec<String> = rdr.headers()?.iter().map(str::to_owned).collect();
+    // `author` is the old name of `creator`; keep one column so `import` does not see both.
+    if let Some(i) = headers.iter().position(|h| h == "author") {
+        if !headers.iter().any(|h| h == "creator") {
+            headers[i] = "creator".into();
+        }
+    }
     let mut col = |name: &str| -> usize {
         headers.iter().position(|h| h == name).unwrap_or_else(|| {
             headers.push(name.to_owned());
@@ -478,48 +554,67 @@ fn match_csv(meta: &Meta, input: &PathBuf, output: &PathBuf) -> Result<()> {
         })
     };
     let (i_kind, i_title, i_year) = (col("kind"), col("title"), col("year"));
-    let (i_src, i_id, i_author) = (col("source"), col("external_id"), col("author"));
+    let (i_src, i_id, i_creator) = (col("source"), col("external_id"), col("creator"));
     let (i_match, i_mtitle, i_cands) = (col("match"), col("match_title"), col("candidates"));
+    let i_logged = headers.iter().position(|h| h == "consumed_at");
     let mut wtr = csv::Writer::from_path(output)?;
     wtr.write_record(&headers)?;
-    let (mut high, mut check, mut none, mut errors, mut skipped) = (0, 0, 0, 0, 0);
+    let (mut high, mut check, mut none, mut manual, mut errors, mut skipped) = (0, 0, 0, 0, 0, 0);
+    let mut quit = false;
     for (n, rec) in rdr.records().enumerate() {
         let mut f: Vec<String> = rec?.iter().map(str::to_owned).collect();
         f.resize(headers.len(), String::new());
         let kind = parse::<Kind>(&f[i_kind]).ok();
-        let Some(kind) = kind.filter(|_| f[i_id].trim().is_empty() && !f[i_title].trim().is_empty()) else {
+        let Some(kind) = kind.filter(|_| !quit && f[i_id].trim().is_empty() && !f[i_title].trim().is_empty()) else {
             skipped += 1;
             wtr.write_record(&f)?;
             continue;
         };
         let year = f[i_year].trim().parse::<i32>().ok();
-        let query = if kind == Kind::Book && !f[i_author].trim().is_empty() {
-            format!("{} {}", f[i_title], f[i_author])
-        } else {
-            f[i_title].clone()
-        };
-        match meta.search(kind, &query) {
+        let creator_in = f[i_creator].trim().to_owned();
+        let query = if kind == Kind::Book && !creator_in.is_empty() { format!("{} {}", f[i_title], creator_in) } else { f[i_title].clone() };
+        match meta.search(kind, &query).or_else(|_| meta.search(kind, &f[i_title])) {
             Ok(found) => {
-                let (pick, conf) = matching::pick(&f[i_title], year, &found);
-                f[i_match] = conf.as_str().to_owned();
-                if let Some(c) = pick.map(|i| &found[i]) {
+                let found = released_by(found, i_logged.map(|i| f[i].as_str()));
+                let (suggested, conf) = matching::pick(&f[i_title], year, (!creator_in.is_empty()).then_some(creator_in.as_str()), &found);
+                let (mut chosen, mut label) = (suggested, conf.as_str());
+                if interactive && conf != matching::Confidence::High {
+                    match ask(&f[i_title], year, &creator_in, &found, suggested, conf)? {
+                        Choice::Pick(i) => {
+                            chosen = Some(i);
+                            label = "manual";
+                        }
+                        Choice::Skip => {
+                            chosen = None;
+                            label = "skipped";
+                        }
+                        Choice::Quit => {
+                            quit = true;
+                            wtr.write_record(&f)?;
+                            continue;
+                        }
+                    }
+                }
+                f[i_match] = label.to_owned();
+                if let Some(c) = chosen.map(|i| &found[i]) {
+                    // TMDB search results carry no director: one details call for the picked record.
+                    let c = if c.creator.is_none() { meta.details(kind, &c.id).map(|d| Candidate { creator: d.creator, ..c.clone() }).unwrap_or_else(|_| c.clone()) } else { c.clone() };
                     f[i_src] = default_source(kind).as_str().to_owned();
                     f[i_id] = c.id.clone();
                     f[i_mtitle] = format!("{}{}", c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
                     if f[i_year].trim().is_empty() {
                         f[i_year] = c.year.map(|y| y.to_string()).unwrap_or_default();
                     }
+                    if creator_in.is_empty() {
+                        f[i_creator] = c.creator.clone().unwrap_or_default();
+                    }
                 }
-                f[i_cands] = found
-                    .iter()
-                    .take(3)
-                    .map(|c| format!("{}: {}{}", c.id, c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default()))
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                match conf {
-                    matching::Confidence::High => high += 1,
-                    matching::Confidence::Check => check += 1,
-                    matching::Confidence::None => none += 1,
+                f[i_cands] = found.iter().take(3).map(|c| format!("{}: {}", c.id, describe(c))).collect::<Vec<_>>().join(" | ");
+                match (label, conf) {
+                    ("manual", _) => manual += 1,
+                    (_, matching::Confidence::High) => high += 1,
+                    (_, matching::Confidence::Check) if label != "skipped" => check += 1,
+                    _ => none += 1,
                 }
             }
             Err(err) => {
@@ -532,7 +627,74 @@ fn match_csv(meta: &Meta, input: &PathBuf, output: &PathBuf) -> Result<()> {
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
     wtr.flush()?;
-    println!("matched: {high} high, {check} to check, {none} none, {errors} errors, {skipped} left as they were -> {}", output.display());
+    println!("matched: {high} high, {check} to check, {manual} picked by hand, {none} none, {errors} errors, {skipped} left as they were -> {}", output.display());
+    Ok(())
+}
+
+/// Fills in the creator of entries that have a provider id but no creator, from the provider's details.
+fn fill_creators(client: &Client, meta: &Meta, only: Option<Kind>, dry_run: bool, limit: Option<usize>) -> Result<()> {
+    let index: serde_json::Value = client.http.get(format!("{}/index.json", client.url)).send()?.error_for_status()?.json()?;
+    let items = index["items"].as_array().context("unexpected /index.json shape")?;
+    let (mut done, mut none, mut failed) = (0, 0, vec![]);
+    for it in items {
+        let (Some(kind), Some(slug)) = (it[0].as_str().and_then(|k| parse::<Kind>(k).ok()), it[1].as_str()) else { continue };
+        if it[9].as_str().is_some_and(|c| !c.is_empty()) || only.is_some_and(|k| k != kind) {
+            continue;
+        }
+        if limit.is_some_and(|l| done >= l) {
+            break;
+        }
+        let cur = match client.get_entry(kind, slug) {
+            Ok(e) => e,
+            Err(e) => {
+                failed.push(format!("{slug}: {e:#}"));
+                continue;
+            }
+        };
+        let (Some(source), Some(id)) = (cur.source, cur.external_id.clone()) else { continue };
+        if source != default_source(kind) || cur.creator.is_some() {
+            continue;
+        }
+        let creator = match meta.details(kind, &id) {
+            Ok(d) => d.creator,
+            Err(e) => {
+                failed.push(format!("{}: {e:#}", cur.title));
+                continue;
+            }
+        };
+        let Some(creator) = creator else {
+            none += 1;
+            continue;
+        };
+        if dry_run {
+            println!("would set creator  {} -> {creator}", cur.title);
+        } else {
+            let edit = EditEntry {
+                title: cur.title.clone(),
+                status: cur.status,
+                rating: cur.rating,
+                review: cur.review,
+                year: cur.year,
+                consumed_at: cur.consumed_at,
+                source: cur.source,
+                external_id: cur.external_id,
+                creator: Some(creator.clone()),
+            };
+            match client.edit_entry(kind, slug, &edit) {
+                Ok(()) => println!("creator  {} -> {creator}", cur.title),
+                Err(e) => {
+                    failed.push(format!("{}: {e:#}", cur.title));
+                    continue;
+                }
+            }
+        }
+        done += 1;
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    println!("{} {done} creators; {none} had none on the provider, {} failed", if dry_run { "would set" } else { "set" }, failed.len());
+    if !failed.is_empty() {
+        bail!("{} failed:\n  {}", failed.len(), failed.join("\n  "));
+    }
     Ok(())
 }
 
@@ -551,6 +713,7 @@ fn set_provider_id(client: &Client, kind: Kind, slug: &str, c: &Candidate) -> Re
         consumed_at: cur.consumed_at,
         source: Some(default_source(kind)),
         external_id: Some(c.id.clone()),
+        creator: cur.creator.or_else(|| c.creator.clone()),
     };
     client.edit_entry(kind, slug, &edit)
 }
@@ -587,12 +750,9 @@ fn find_covers(client: &Client, meta: &Meta, only: Option<Kind>, dry_run: bool, 
         };
         // You can't have consumed something before it came out: drop later-dated records (a 2010 log
         // entry is not the 2025 remake). Allows one year of slack for regional release dates.
-        let logged_year = it[7].as_str().and_then(|d| d.get(..4)).and_then(|y| y.parse::<i32>().ok());
-        let found: Vec<Candidate> = match logged_year {
-            Some(ly) => found.into_iter().filter(|c| c.year.is_none_or(|cy| cy <= ly + 1)).collect(),
-            None => found,
-        };
-        let (pick, conf) = matching::pick(title, year, &found);
+        let found = released_by(found, it[7].as_str());
+        let creator = it[9].as_str().filter(|c| !c.is_empty());
+        let (pick, conf) = matching::pick(title, year, creator, &found);
         let take = match conf {
             matching::Confidence::High => true,
             matching::Confidence::Check => accept_check,
@@ -605,6 +765,14 @@ fn find_covers(client: &Client, meta: &Meta, only: Option<Kind>, dry_run: bool, 
             continue;
         };
         let label = format!("{title} -> {}{}", c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
+        // TMDB search results carry no director: look it up once the match is accepted.
+        let enriched;
+        let c = if !dry_run && c.creator.is_none() {
+            enriched = meta.details(kind, &c.id).map(|d| Candidate { creator: d.creator, ..c.clone() }).unwrap_or_else(|_| c.clone());
+            &enriched
+        } else {
+            c
+        };
         if dry_run {
             println!("would set {}  {label}  [{}]", if ids_only { "id" } else { "cover" }, conf.as_str());
         } else if ids_only {
@@ -647,7 +815,7 @@ fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
     match &cli.cmd {
-        Cmd::Add { kind, title, status, rating, year, review, date, source, external_id, no_cover } => {
+        Cmd::Add { kind, title, status, rating, year, review, date, source, external_id, creator, no_cover } => {
             let status = parse::<Status>(status)?;
             let entry = NewEntry {
                 kind: parse::<Kind>(kind)?,
@@ -658,6 +826,7 @@ fn main() -> Result<()> {
                 year: *year,
                 source: source.as_deref().map(parse::<Source>).transpose()?,
                 external_id: external_id.clone(),
+                creator: creator.clone(),
                 consumed_at: date.clone().or_else(|| today_if_consumed(status)),
             };
             let mut entry = entry;
@@ -667,7 +836,7 @@ fn main() -> Result<()> {
             let title = add_one(&Client::new(&cli)?, &Meta::new(&cli)?, entry, !no_cover)?;
             println!("added {title}");
         }
-        Cmd::Edit { kind, slug, title, status, rating, review, date, year, external_id } => {
+        Cmd::Edit { kind, slug, title, status, rating, review, date, year, external_id, creator } => {
             let kind = parse::<Kind>(kind)?;
             let client = Client::new(&cli)?;
             let cur = client.get_entry(kind, slug)?;
@@ -685,6 +854,7 @@ fn main() -> Result<()> {
                     None => cur.source,
                 },
                 external_id: blank(external_id).unwrap_or(cur.external_id),
+                creator: blank(creator).unwrap_or(cur.creator),
             };
             edit.validate_for(kind).map_err(anyhow::Error::msg)?;
             client.edit_entry(kind, slug, &edit)?;
@@ -700,14 +870,18 @@ fn main() -> Result<()> {
         Cmd::Search { kind, query } => {
             let kind = parse::<Kind>(kind)?;
             for c in Meta::new(&cli)?.search(kind, query)?.into_iter().take(10) {
-                println!("{:>8}  {}{}", c.id, c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
+                println!("{:>8}  {}{}{}", c.id, c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default(), c.creator.map(|a| format!("  by {a}")).unwrap_or_default());
             }
         }
-        Cmd::Covers { kind, dry_run, accept_check, limit, ids_only } => {
+        Cmd::Covers { kind, dry_run, accept_check, limit, ids_only, creators } => {
             let kind = kind.as_deref().map(parse::<Kind>).transpose()?;
-            find_covers(&Client::new(&cli)?, &Meta::new(&cli)?, kind, *dry_run, *accept_check, *limit, *ids_only)?
+            if *creators {
+                fill_creators(&Client::new(&cli)?, &Meta::new(&cli)?, kind, *dry_run, *limit)?
+            } else {
+                find_covers(&Client::new(&cli)?, &Meta::new(&cli)?, kind, *dry_run, *accept_check, *limit, *ids_only)?
+            }
         }
-        Cmd::Match { input, output } => match_csv(&Meta::new(&cli)?, input, output)?,
+        Cmd::Match { input, output, interactive } => match_csv(&Meta::new(&cli)?, input, output, *interactive)?,
         Cmd::Import { file, dry_run, skip_existing, no_cover } => {
             let mut rdr = csv::Reader::from_path(file)?;
             let rows = rdr

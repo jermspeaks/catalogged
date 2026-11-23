@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 pub const GAMES_URL: &str = "https://api.igdb.com/v4/games";
 const IMAGE: &str = "https://images.igdb.com/igdb/image/upload";
-const FIELDS: &str = "fields name,first_release_date,cover.image_id,summary;";
+const FIELDS: &str = "fields name,first_release_date,cover.image_id,summary,involved_companies.developer,involved_companies.company.name;";
 
 /// Token request URL (POST, no body). Tokens last ~2 months; fetch once per run.
 pub fn token_url(client_id: &str, client_secret: &str) -> String {
@@ -42,18 +42,36 @@ struct Cover {
 }
 
 #[derive(Deserialize)]
+struct Company {
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Involved {
+    #[serde(default)]
+    developer: bool,
+    company: Option<Company>,
+}
+
+#[derive(Deserialize)]
 struct Game {
     id: i64,
     name: Option<String>,
     first_release_date: Option<i64>,
     cover: Option<Cover>,
     summary: Option<String>,
+    #[serde(default)]
+    involved_companies: Vec<Involved>,
 }
 
 pub fn parse_games(json: &str) -> Result<Vec<Candidate>, serde_json::Error> {
     Ok(serde_json::from_str::<Vec<Game>>(json)?
         .into_iter()
         .map(|g| Candidate {
+            creator: {
+                let v: Vec<String> = g.involved_companies.iter().filter(|i| i.developer).filter_map(|i| i.company.as_ref()?.name.clone()).take(3).collect();
+                (!v.is_empty()).then(|| v.join(", "))
+            },
             id: g.id.to_string(),
             title: g.name.unwrap_or_default(),
             year: g.first_release_date.map(year_of),
@@ -89,7 +107,10 @@ mod tests {
         assert_eq!(year_of(799_286_400), 1995);
         assert_eq!(year_of(1_609_459_199), 2020); // 2020-12-31T23:59:59Z
         assert_eq!(year_of(1_609_459_200), 2021);
-        assert_eq!(search_body("a\"b"), "search \"a\\\"b\"; fields name,first_release_date,cover.image_id,summary; limit 10;");
+        assert_eq!(search_body("a\"b"), "search \"a\\\"b\"; fields name,first_release_date,cover.image_id,summary,involved_companies.developer,involved_companies.company.name; limit 10;");
+        let h = parse_games(r#"[{"id":1,"name":"G","involved_companies":[{"developer":false,"company":{"name":"Publisher"}},{"developer":true,"company":{"name":"Supergiant Games"}}]}]"#).unwrap();
+        assert_eq!(h[0].creator.as_deref(), Some("Supergiant Games")); // developers only, not publishers
+        assert!(g[0].creator.is_none());
         assert!(details_body("12; drop").is_none() && details_body("12").is_some());
     }
 }
