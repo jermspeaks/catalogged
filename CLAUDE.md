@@ -4,7 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Greenfield. No code, build, lint, or test commands exist yet. Update this file once the project is scaffolded (add the real commands, including how to run a single test).
+Scaffolded (workspace, D1 schema, Worker list page + create endpoint, CLI add/import). Not yet deployed; metadata providers, admin UI, covers and public pages are still to do. See `docs/plan.md` for the roadmap and `README.md` for setup.
+
+## Commands
+
+```sh
+cargo test -p catalogged-core                      # tests (one test: cargo test -p catalogged-core slugs)
+cargo check -p catalogged-worker --target wasm32-unknown-unknown   # the worker only builds for wasm
+cargo build -p catalogged-cli                      # binary is `catalogged`
+cd crates/worker && wrangler dev                   # run locally (needs worker-build + wrangler)
+cd crates/worker && wrangler d1 migrations apply catalogged --local
+```
+
+## Layout
+
+- `crates/core`: shared types (`Kind`, `Status`, `NewEntry`, ...). Keep it free of Worker/runtime deps. Enum string values (snake_case) must match the CHECK constraints in `migrations/`.
+- `crates/worker`: axum on workers-rs. D1 futures are not `Send`, so handlers use `#[worker::send]`. `wrangler.toml` lives here and points at `../../migrations`.
+- `crates/cli`: blocking reqwest client posting to `/admin/api/entries` with Cloudflare Access service-token headers.
+- The admin UI and CLI share one write endpoint so validation lives in the Worker.
 
 ## What this is
 
@@ -26,6 +43,4 @@ Inspiration: https://erika.florist/catalogue/ (a local copy is at `~/projects/er
   - Books: Open Library (no key)
 - **Tooling:** bulk import/backfills should be a local Rust CLI, not Worker code. The Cloudflare MCP (https://mcp.cloudflare.com/mcp) can be used to create the D1 database and R2 bucket.
 
-## Open questions
-
-- Whether a CLI is also wanted for adding single entries (web admin is the baseline).
+- **CLI:** `catalogged add` (single) and `catalogged import <csv>` (bulk), both going through the Worker API.

@@ -1,0 +1,19 @@
+[package]
+name = "catalogged-worker"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["form", "json", "query"] }
+catalogged-core = { path = "../core" }
+console_error_panic_hook = "0.1.7"
+http = "1.5.0"
+maud = "0.27.0"
+serde = "1.0.229"
+serde_json = "1.0.154"
+tower-service = "0.3.3"
+worker = { version = "0.9.0", features = ["http", "d1"] }

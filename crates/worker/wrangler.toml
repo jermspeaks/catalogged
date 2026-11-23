@@ -1,0 +1,16 @@
+name = "catalogged"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-11-01"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "catalogged"
+database_id = "REPLACE_ME" # from `wrangler d1 create catalogged`
+migrations_dir = "../../migrations"
+
+[[r2_buckets]]
+binding = "COVERS"
+bucket_name = "catalogged-covers"
