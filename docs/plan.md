@@ -88,6 +88,9 @@ At personal-site traffic both are fine; the bucket domain mainly buys headroom a
 - Built: palette from discovery.md, dark mode following the system, with a Theme picker (system / light / dark) saved in `localStorage`.
 - Still to do: measure the real `/index.json` CPU time and size with a few thousand rows (seed first); not yet exercised in a browser; richer detail pages; per-kind and per-status counts; lazy cover sizing. FTS5 on D1 stays unverified and is only a fallback if the JSON approach proves too heavy.
 
+### E2E tests: built
+- `e2e/` (Playwright, 20 tests). See README. Not covered: real providers (mocked on purpose), Cloudflare Access, the production cache layer, and CI (none yet; run `npm test` before merging Worker or UI changes).
+
 ### 8. Hardening and operations
 - Verify the Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`) inside the Worker as defense in depth, so a misconfigured Access app cannot expose `/admin`.
 - A repeatable D1 backup (`wrangler d1 export`) on a schedule or by hand; know how to use D1 Time Travel.

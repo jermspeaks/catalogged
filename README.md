@@ -73,3 +73,13 @@ CSV columns: `kind,title,status,rating,review,year,source,external_id,consumed_a
 ## Admin UI
 
 `/admin` (behind Cloudflare Access): search (movies, shows, books, games) and Add; Add by id (TMDB, IMDb `tt...`, Open Library work id, IGDB id); Add manually with an optional cover file. Each catalogue row opens an edit page with every field, a cover upload/replace, and Delete behind a confirm dialog. The browser converts covers to WebP with a canvas (scaled to <= 500 px wide) and uploads them. Game search in production needs the IGDB Worker secrets (see docs/plan.md item 5).
+
+## End-to-end tests
+
+```sh
+cd e2e
+npm install && npx playwright install chromium   # once
+npm test                                          # starts its own wrangler dev on :8788, throwaway D1/R2 in e2e/.state
+```
+
+Covers the admin API (validation, duplicates, cover rules and hashed keys), the admin pages in a real browser (manual add with cover, edit, cover replace, confirmed delete, add by id and search with providers mocked), and the public grid (search, filters, sorting, theme, no-JS fallback). Nothing touches production or any Cloudflare service; the first run compiles the Worker, so allow a few minutes.

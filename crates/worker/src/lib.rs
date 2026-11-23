@@ -70,7 +70,9 @@ fn router(env: Env) -> Router {
 #[event(fetch)]
 async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<http::Response<worker::Body>> {
     console_error_panic_hook::set_once();
-    let cacheable = req.method() == http::Method::GET && !req.uri().path().starts_with("/admin");
+    // DISABLE_CACHE=1 is for the e2e tests only (so writes show up immediately); never set it in production.
+    let cache_off = env.var("DISABLE_CACHE").map(|v| v.to_string()).ok().as_deref() == Some("1");
+    let cacheable = !cache_off && req.method() == http::Method::GET && !req.uri().path().starts_with("/admin");
     let key = cache_key(&req.uri().to_string());
     let cache = Cache::default();
     if cacheable {

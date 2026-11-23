@@ -1,0 +1,15 @@
+{
+  "name": "catalogged-e2e",
+  "version": "1.0.0",
+  "description": "End-to-end tests against a local wrangler dev with a throwaway D1/R2",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "wrangler": "^4.166.0"
+  },
+  "private": true
+}
