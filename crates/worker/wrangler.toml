@@ -1,14 +1,17 @@
 name = "catalogged"
 main = "build/worker/shim.mjs"
 compatibility_date = "2026-11-01"
+# Custom domain only. Without these, every `wrangler deploy` re-enables the *.workers.dev URL.
+workers_dev = false
+preview_urls = false
 
 [vars]
 # Public R2 domain for covers (set after connecting the domain to the bucket). Empty = Worker serves /covers (local dev uses .dev.vars to override).
 COVERS_BASE_URL = "https://covers.05152024.xyz"
 # Access JWT verification for /admin (docs/operations.md). Both are required in production: with
 # either empty the admin answers 503 (fails closed). Not secrets.
-ACCESS_TEAM_DOMAIN = ""  # https://<team>.cloudflareaccess.com
-ACCESS_AUD = ""          # the Access application's Audience (AUD) tag
+ACCESS_TEAM_DOMAIN = "https://muddy-shadow-8cbf.cloudflareaccess.com"  # https://<team>.cloudflareaccess.com
+ACCESS_AUD = "2e3fa97aebb3b36bec9972e684fb243374392ad716b202d2b3550bcfe6f996d6"          # the Access application's Audience (AUD) tag
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
