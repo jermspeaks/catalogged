@@ -36,7 +36,7 @@ def parse(src: str, year: str) -> list[dict]:
         # Drop markdown links and bare [Letterboxd](url) style suffixes.
         rest = re.sub(r"\s*\[[^\]]*\]\([^)]*\)", "", rest)
         rest = re.sub(r"\s*\[[^\]]*\]\S*", "", rest)
-        rest = re.sub(r"\s*\((MOVIE|SHOW|TV)\)\s*$", "", rest).strip()
+        rest = re.sub(r"\s*\((MOVIE|SHOW|TV|BOOK|GAME)\)\s*$", "", rest).strip()
         creator = ""
         if kind == "book" and " by " in rest:
             rest, creator = rest.rsplit(" by ", 1)
