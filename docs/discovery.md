@@ -2,8 +2,13 @@
 
 ## Missing features
 
-- Seed the initial database with the collections.
-- Adding a dark mode and system selection (system chooses light or dark)
+- [x] Seed the initial database with the collections.
+- [x] Adding a dark mode and system selection (system chooses light or dark)
+- [x] Favicon and manifest.json
+- [x] Dark and system mode theme selection for admin pages
+- [x] link back to main page from admin
+- [x] edit button for each details page (and since it's redirect for admin, nobody in public will have access to it)
+- [x] In the edit details page, we can also delete, which needs to be behind a dialog to be sure I want to delete it
 
 ## Testing
 

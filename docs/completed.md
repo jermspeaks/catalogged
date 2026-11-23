@@ -47,6 +47,12 @@ _Last reviewed: 2026-11-23._
 - Public site: detail page `/entry/{kind}/{slug}` with the review; home paginated at 60 per page with a kind filter; the cache key varies only on `kind` and `page`.
 - Validation in `crates/core`: rating 1-10, valid dates, review length.
 
+### PRs #5 to #8: seed import, covers domain, public grid, books and games
+- `import` accepts id-only sheets (IMDb ids resolved via TMDB); covers served from `covers.05152024.xyz` via `COVERS_BASE_URL`; public grid with client-side search/filter/sort from `/index.json`, palette and dark mode; Open Library and IGDB providers in core, CLI and admin search.
+
+### PR #9: admin gaps, public fixes
+- Add by id, manual add, edit page with cover upload and confirmed delete, admin theme and navigation, favicon and manifest, content-hashed covers, cover aspect ratio fix on the grid.
+
 ## Known gaps in what is "done"
 
 - The admin page's JavaScript (search, Add, canvas WebP, edit, delete) has never been run in a browser by the author of the code. The endpoints it calls were tested; the page itself needs a manual click-through.

@@ -78,10 +78,10 @@ At personal-site traffic both are fine; the bucket domain mainly buys headroom a
 - The Worker fetches a fresh token per admin search (2 subrequests, limit 50). Cache it only if searches become frequent.
 - IGDB data quirk: unreleased/TBD games can carry placeholder release years.
 
-### 6. Admin gaps
-- Manual cover upload/replace for any entry (needed for anything without a provider cover).
-- Add-by-id and manual (no provider) entry in the admin UI, mirroring the CLI.
-- Optional: purge the cached public pages for an entry after an edit or delete.
+### 6. Admin gaps: built
+- `/admin` has Add by id (TMDB, IMDb `tt`, Open Library work id, IGDB id), Add manually (no provider, optional cover file), and a catalogue list linking to a per-entry edit page `/admin/edit/{kind}/{slug}`: all fields, cover upload/replace, and Delete behind a confirm dialog. Detail pages link to the edit page (Access gates it). Admin pages share the theme picker and link back to the public site; favicon and web manifest added.
+- Covers now use content-hashed keys (`kind/slug-<hash>.webp`) with an immutable one-year cache; replacing a cover writes a new key and deletes the old object, so stale images are impossible. Older unhashed keys keep working until replaced.
+- Still optional: purge cached public pages after an edit or delete (they refresh within 5 minutes).
 
 ### 7. Public site: grid, filter, sort, search
 - Built (first cut): `/index.json` (one compact JSON array per entry, assembled by SQLite so the Worker does not decode rows; cached 15 min, so a cache miss reads the table once, about 5k rows at the limit). A small script on `/` loads it once and does search, kind/status filter and sort (recent, date logged, title, year, rating) in the browser, with "Show more" in batches of 60 and the state kept in the URL. The server-rendered first page and kind links remain as the no-JS fallback. Zero D1 reads per interaction.

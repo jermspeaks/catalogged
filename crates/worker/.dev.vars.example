@@ -2,3 +2,5 @@ ADMIN_ENABLED=1
 TMDB_API_KEY=
 IGDB_CLIENT_ID=
 IGDB_CLIENT_SECRET=
+# Local dev: serve covers from the Worker instead of the production bucket domain
+COVERS_BASE_URL=
