@@ -113,6 +113,23 @@ enum Cmd {
         #[arg(long)]
         no_cover: bool,
     },
+    /// Find and upload covers for entries that have none (for example title-only imports): reads the
+    /// public /index.json, searches the provider for each cover-less entry by title and year, and
+    /// uploads the cover of an exact-title match. Re-runnable: entries that already have a cover are skipped.
+    Covers {
+        /// Only this kind: game | book | show | movie
+        #[arg(long)]
+        kind: Option<String>,
+        /// Print what would be uploaded; send nothing to the Worker
+        #[arg(long)]
+        dry_run: bool,
+        /// Also accept the provider's first exact-title result when several records share the title (check)
+        #[arg(long)]
+        accept_check: bool,
+        /// Stop after this many uploads (a first try before the full run)
+        #[arg(long)]
+        limit: Option<usize>,
+    },
     /// Find provider ids for rows that have none: searches TMDB / Open Library / IGDB by title (and
     /// author for books) and writes a new CSV with source, external_id and year filled in, plus
     /// match (high | check | none), match_title and candidates columns to review before `import`.
@@ -513,6 +530,76 @@ fn match_csv(meta: &Meta, input: &PathBuf, output: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+/// Cover-less entries from the public index, searched on the provider and filled in (see `Cmd::Covers`).
+fn find_covers(client: &Client, meta: &Meta, only: Option<Kind>, dry_run: bool, accept_check: bool, limit: Option<usize>) -> Result<()> {
+    // Rows are [kind, slug, title, status, rating, year, cover_key, consumed_at, updated_at].
+    let index: serde_json::Value = client.http.get(format!("{}/index.json", client.url)).send()?.error_for_status()?.json()?;
+    let items = index["items"].as_array().context("unexpected /index.json shape")?;
+    let (mut done, mut unmatched, mut failed) = (0, vec![], vec![]);
+    let mut seen = 0;
+    for it in items {
+        let (Some(kind), Some(slug), Some(title)) = (it[0].as_str().and_then(|k| parse::<Kind>(k).ok()), it[1].as_str(), it[2].as_str()) else {
+            continue;
+        };
+        if it[6].as_str().is_some_and(|k| !k.is_empty()) || only.is_some_and(|k| k != kind) {
+            continue;
+        }
+        if limit.is_some_and(|l| done >= l) {
+            break;
+        }
+        seen += 1;
+        let year = it[5].as_i64().map(|y| y as i32);
+        let found = match meta.search(kind, title) {
+            Ok(f) => f,
+            Err(e) => {
+                failed.push(format!("{title}: search failed: {e:#}"));
+                continue;
+            }
+        };
+        // You can't have consumed something before it came out: drop later-dated records (a 2010 log
+        // entry is not the 2025 remake). Allows one year of slack for regional release dates.
+        let logged_year = it[7].as_str().and_then(|d| d.get(..4)).and_then(|y| y.parse::<i32>().ok());
+        let found: Vec<Candidate> = match logged_year {
+            Some(ly) => found.into_iter().filter(|c| c.year.is_none_or(|cy| cy <= ly + 1)).collect(),
+            None => found,
+        };
+        let (pick, conf) = matching::pick(title, year, &found);
+        let take = match conf {
+            matching::Confidence::High => true,
+            matching::Confidence::Check => accept_check,
+            matching::Confidence::None => false,
+        };
+        let Some(c) = pick.map(|i| &found[i]).filter(|c| take && c.cover_url.is_some()) else {
+            let first = found.first().map(|c| format!(" (first result: {}{})", c.title, c.year.map(|y| format!(" {y}")).unwrap_or_default())).unwrap_or_default();
+            unmatched.push(format!("{} [{}]{first}", title, conf.as_str()));
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            continue;
+        };
+        let label = format!("{title} -> {}{}", c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
+        if dry_run {
+            println!("would set cover  {label}  [{}]", conf.as_str());
+        } else {
+            match meta.cover_webp(c.cover_url.as_deref().unwrap_or_default()).and_then(|w| client.put_cover(kind, slug, w)) {
+                Ok(()) => println!("cover  {label}"),
+                Err(e) => {
+                    failed.push(format!("{title}: {e:#}"));
+                    continue;
+                }
+            }
+        }
+        done += 1;
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    println!("{} {done} of {seen} cover-less entries; {} not matched, {} failed", if dry_run { "would set" } else { "set" }, unmatched.len(), failed.len());
+    for u in &unmatched {
+        println!("  no cover: {u}");
+    }
+    if !failed.is_empty() {
+        bail!("{} failed:\n  {}", failed.len(), failed.join("\n  "));
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
@@ -566,6 +653,10 @@ fn main() -> Result<()> {
             for c in Meta::new(&cli)?.search(kind, query)?.into_iter().take(10) {
                 println!("{:>8}  {}{}", c.id, c.title, c.year.map(|y| format!(" ({y})")).unwrap_or_default());
             }
+        }
+        Cmd::Covers { kind, dry_run, accept_check, limit } => {
+            let kind = kind.as_deref().map(parse::<Kind>).transpose()?;
+            find_covers(&Client::new(&cli)?, &Meta::new(&cli)?, kind, *dry_run, *accept_check, *limit)?
         }
         Cmd::Match { input, output } => match_csv(&Meta::new(&cli)?, input, output)?,
         Cmd::Import { file, dry_run, skip_existing, no_cover } => {

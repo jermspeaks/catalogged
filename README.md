@@ -65,6 +65,7 @@ cargo run -p catalogged-cli -- add --kind movie --title "Some Film" --status con
 cargo run -p catalogged-cli -- edit --kind movie --slug some-film --rating 9 --review "Better on rewatch"          # only passed flags change
 cargo run -p catalogged-cli -- delete --kind movie --slug some-film --yes                                          # also removes the cover
 cargo run -p catalogged-cli -- match log.csv log-matched.csv                      # find provider ids for rows that have none; review before importing
+cargo run -p catalogged-cli -- covers --dry-run                                   # find covers for entries that have none (re-runnable; --kind, --limit, --accept-check)
 cargo run -p catalogged-cli -- import entries.csv --dry-run
 cargo run -p catalogged-cli -- import entries.csv                                 # --no-cover to skip covers, --skip-existing to re-run safely
 ```
@@ -72,6 +73,8 @@ cargo run -p catalogged-cli -- import entries.csv                               
 CSV columns: `kind,title,status,rating,review,year,source,external_id,consumed_at` (`notes` is accepted as an alias for `review`). `add` logs a `consumed` entry with no date as today; `import` leaves the date blank. Every column is optional except that a row needs a `title` or an `external_id`. An IMDb id (`tt...`) in `external_id` fills in kind, title and year from TMDB; for any other provider id set `kind` (the source follows from it: movie/show = TMDB, book = Open Library work id, game = IGDB id). `status` defaults to `consumed`. `--skip-existing` makes a re-run safe. See `docs/seed-example.csv`. Covers are downloaded from the provider (TMDB, Open Library or IGDB), converted to WebP (<= 300 KB), and uploaded to R2. A cover failure never loses the entry.
 
 `match` is for sheets with titles but no ids (for example a reading log). It searches TMDB / Open Library / IGDB for each row without an `external_id` (books also use an `author` column) and writes a new CSV with `source`, `external_id` and `year` filled in, plus `match` (`high`: exact title and year agree; `check`: exact title but several records share it, so confirm the pick; `none`: nothing matched), `match_title` and `candidates` (top three, as `id: title (year)`). Fix the `check` and `none` rows by hand (copy an id from `candidates`, or clear `external_id` to add the row without a provider), then run `import`. Rows that already have an id pass through. Nothing is sent to the Worker. Entries with an id get covers on import; entries without one get none, and you can add one from the edit page.
+
+`covers` fills in covers for entries that already exist without one (for example title-only imports). It reads the public `/index.json`, searches the provider by title for each cover-less entry, and uploads the cover of an exact-title match. Results released after the year you logged the entry are ignored (a 2010 log entry is not the 2025 remake). Ambiguous matches are listed, not guessed, unless you pass `--accept-check`; fix those on the entry's edit page (Find a cover). It does not store a provider id on the entry. `/index.json` is cached up to 15 minutes, so entries added in the last few minutes may not show yet.
 
 ## Admin UI
 
