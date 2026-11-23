@@ -65,6 +65,11 @@ _Last reviewed: 2026-11-23, after PR #16._
 - `catalogged covers` (bulk cover finder for cover-less entries; ignores records newer than the logged year) and `--ids-only` (backfill ids). `PUT` on an entry now takes `source` and `external_id`; the edit page has a provider-id field.
 - Writes purge the cached public pages they change (per data centre); the e2e suite runs with the cache on.
 
+### Edit page polish
+- Edit page: cover column beside a two-column field grid (stacks on narrow screens); toast messages with a spinner while working (errors styled, successes auto-hide) and buttons disabled while a save, search or upload runs.
+- Find a cover fills the provider id and year when the entry has none (press Save to keep them).
+- Placeholder image (an SVG in the palette, no R2 cost) for entries without a cover: server-rendered list, script grid, detail page and edit page.
+
 ## Discovery items done (triaged 2026-11-23)
 
 - Seed the initial database (2010 imported; later years in plan.md).
@@ -73,8 +78,9 @@ _Last reviewed: 2026-11-23, after PR #16._
 - Link back to the public site from admin; Edit button on each detail page.
 - Delete from the edit page behind a confirm dialog.
 - E2E testing on a dev version covering the admin and public pages.
-- Colour palette applied (see discovery.md).
 - Bulk cover finder (`catalogged covers`).
+- Placeholder image; form feedback on the edit page; edit form grid layout; auto-fill the provider id when picking a cover (edit page polish).
+- Colour palette: now only in the CSS (`crates/worker/src/public_ui.rs`); removed from discovery.md.
 - Duplicates are rejected: the database enforces one entry per slug and per provider id, and the admin shows the 409. (A warning *before* adding is still open in plan.md.)
 
 ## Known gaps in what is "done"

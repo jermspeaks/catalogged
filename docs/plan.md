@@ -1,6 +1,6 @@
 # Plan
 
-What is built lives in [completed.md](completed.md). This file is what remains, in priority order, plus the decisions that shape it. The free-tier rules in [free-tier.md](free-tier.md) apply to every item. Last reviewed: 2026-11-23, after PR #16.
+What is built lives in [completed.md](completed.md). This file is what remains, in priority order, plus the decisions that shape it. The free-tier rules in [free-tier.md](free-tier.md) apply to every item. Last reviewed: 2026-11-23, after the edit page polish.
 
 ## Goals
 
@@ -30,37 +30,30 @@ What is built lives in [completed.md](completed.md). This file is what remains, 
 
 ## Priorities
 
-Ordered by value for the owner's actual goal (a complete, good-looking catalogue) against effort. Sizes: S under half a day, M about a day, L more. Reorder freely.
+Ordered by value for the owner's actual goal (a complete, good-looking catalogue) against effort. The edit page polish (layout, toasts and loading states, id fill on cover pick, placeholder image) is done and recorded in completed.md. Sizes: S under half a day, M about a day, L more. Reorder freely.
 
 ### P1. Import the rest of the log (M)
 The 2010 sheet is in; 2011 to 2026 are not. The owner's log lives in `~/projects/jermspeaks.github.io/src/content/log/` (one markdown file per year, with books, movies, some games and shows; later years carry TMDB links and Letterboxd links).
 - Move the log-to-CSV generator into the repo (it is a throwaway script in `/tmp` today) and extend it to every year's formats (links, `🔁` rewatch marks, `🎮`/`📺` lines with year ranges, season numbers).
 - Run `match`, review, then `import` year by year (dry run, 10 rows, the rest with `--skip-existing`; `scripts/backup.sh` first). Mind the D1 write budget: 5,000 entries is about half of one day's writes; import a year or two per run.
-- Dependency: P2 makes the review step much less painful. P3 should follow the first large import.
+- Dependency: P2 makes the review step much less painful. P3 should follow the first large import. The edit page polish (done) makes fixing leftovers by hand quicker.
 
-### P2. Better matching (S to M)
+### P2. Better matching, with a creator field (S to M)
 About half the 2010 rows came back `none` or `check`. Causes seen: misspelt titles ("Momento"), subtitles or part numbers ("Red Cliff: Part 1", "The Godfather: Part I"), a leading "The", "&" versus "and", and books with no year or author on file.
 - Fuzzy title matching in `crates/core/src/matching.rs` (token overlap or edit distance, with a threshold; anything fuzzy is always `check`, never `high`).
-- Store the book author so books can be matched (and shown). Needs a migration for an `author` (or generic `creator`) column and a field on the entry; decide the name before building.
+- Store a generic **creator** on every entry (author, director or studio; decided 2026-11-23) so books can be matched by author and the field can be shown on the entry. Needs a migration (`creator TEXT`), the field in the entry/edit APIs and edit page, `creator` and the old `author` column accepted in CSV import, and providers filling it (Open Library authors, TMDB director, IGDB developer).
 - Interactive review: print each `check`/`none` row with candidates and let the owner pick by number, instead of hand-editing the CSV.
 
 ### P3. Measure at scale (S, after a big import)
 Nothing has been measured above 79 entries. Before approaching 5,000: size and CPU time of `/index.json`, D1 rows read per day, R2 operations (see the monitoring checklist in [operations.md](operations.md)). If `/index.json` is too heavy, options are trimming fields, paging it, or FTS5 on D1 (unverified).
 
-### P4. Edit page polish (S)
-All four were raised by the owner.
-- Layout: the form is one long single column; use a grid (cover on one side, fields in two columns).
-- Feedback: a toast and a loading state for save, cover upload, search and delete (today a single status line).
-- Find a cover should also fill the provider id field when the owner picks a result (the CLI `covers` already does this).
-- Placeholder image for entries without a cover (about 35 of the 2010 entries today), on the grid, the detail page and the edit page. An SVG in the palette, no R2 cost.
-
-### P5. Warn before adding a duplicate (S)
+### P4. Warn before adding a duplicate (S)
 The database already rejects duplicates (409). In the admin search results, mark titles already in the catalogue ("in catalogue", linking to its edit page) and disable Add, instead of failing after the click. Needs the existing list (`/index.json`) loaded on the admin page.
 
-### P6. Public site (M, as wanted)
+### P5. Public site (M, as wanted)
 Per-kind and per-status counts; richer detail pages (year, source link, provider overview); lazy cover sizing. Optional until the catalogue is populated, since the grid is the main surface.
 
-### P7. Housekeeping (S each)
+### P6. Housekeeping (S each)
 - GitHub Action running the e2e suite on pull requests (none exists; run `npm test` in `e2e/` before merging Worker or UI changes today).
 - PNG and apple-touch icons (the favicon and manifest use an SVG only).
 - Test the manual-cover path of `scripts/backup.sh` once a manually uploaded cover exists.

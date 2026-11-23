@@ -11,7 +11,20 @@ use maud::{html, Markup, PreEscaped, DOCTYPE};
 const COMMON_JS: &str = r#"
 const $ = (s) => document.querySelector(s);
 const MAX = __MAX__;
-const msg = (t) => ($('#msg').textContent = t);
+let msgTimer;
+// Toast: busy (spinner) while a message ends in an ellipsis, error on failures, otherwise ok and auto-hides.
+function msg(t, type) {
+  const el = $('#msg'); clearTimeout(msgTimer);
+  type = type || (/fail|error|refus|cannot/i.test(t) ? 'err' : /…$/.test(t) ? 'busy' : 'ok');
+  el.textContent = t; el.className = t ? type : '';
+  if (t && type === 'ok') msgTimer = setTimeout(() => { el.textContent = ''; el.className = ''; }, 8000);
+}
+// Disable a form's buttons and dim it while `fn` runs, so a slow save can't be double-submitted.
+async function busy(el, fn) {
+  const btns = [...el.querySelectorAll('button')];
+  btns.forEach((b) => (b.disabled = true)); el.setAttribute('aria-busy', 'true');
+  try { return await fn(); } finally { btns.forEach((b) => (b.disabled = false)); el.removeAttribute('aria-busy'); }
+}
 const SOURCE = { movie: 'tmdb', show: 'tmdb', book: 'open_library', game: 'igdb' };
 
 async function loadImage(src) {
@@ -50,8 +63,8 @@ async function putCover(kind, slug, src) {
 "#;
 
 const ADMIN_JS: &str = r#"
-async function search(ev) {
-  ev.preventDefault();
+function search(ev) { ev.preventDefault(); return busy($('#search'), () => doSearch()); }
+async function doSearch() {
   const kind = $('#kind').value, q = $('#q').value.trim();
   if (!q) return;
   msg('Searching…');
@@ -138,8 +151,9 @@ const EDIT_JS: &str = r#"
 const form = $('#edit'); const { kind, slug } = form.dataset;
 const val = (n) => form.elements[n].value.trim() || null;
 
-form.addEventListener('submit', async (ev) => {
-  ev.preventDefault();
+form.addEventListener('submit', (ev) => { ev.preventDefault(); busy(form, save); });
+async function save() {
+  msg('Saving…');
   const rating = val('rating'), year = val('year');
   const r = await fetch(`/admin/api/entries/${kind}/${slug}`, {
     method: 'PUT', headers: { 'content-type': 'application/json' },
@@ -148,12 +162,13 @@ form.addEventListener('submit', async (ev) => {
       source: val('external_id') && SOURCE[kind], external_id: val('external_id') }),
   });
   msg(r.ok ? 'Saved ✓ (public pages update right away here; other locations catch up within minutes)' : `Failed: ${r.status} ${(await r.text()).slice(0, 120)}`);
-});
+}
 
 async function setCover(src) {
   msg('Converting and uploading…');
   try {
     const { url } = await putCover(kind, slug, src);
+    $('#coverph')?.remove();
     let img = $('#coverimg');
     if (!img) { img = document.createElement('img'); img.id = 'coverimg'; img.className = 'cover'; img.alt = ''; $('#coverbox').prepend(img); }
     img.src = url; msg('Cover updated ✓');
@@ -163,11 +178,11 @@ async function setCover(src) {
 $('#coverfile').addEventListener('change', (ev) => { const file = ev.target.files[0]; if (file) setCover(file); });
 
 // Cover from a link (the Worker relays the image because most hosts block direct reads).
-$('#coverlink').addEventListener('submit', (ev) => { ev.preventDefault(); setCover($('#coverurl').value.trim()); });
+$('#coverlink').addEventListener('submit', (ev) => { ev.preventDefault(); busy(ev.target, () => setCover($('#coverurl').value.trim())); });
 
 // Cover from a provider search (same sources as adding an entry).
-$('#coversearch').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
+$('#coversearch').addEventListener('submit', (ev) => { ev.preventDefault(); busy(ev.target, coverSearch); });
+async function coverSearch() {
   const q = $('#coverq').value.trim(); if (!q) return;
   msg('Searching…');
   const r = await fetch(`/admin/api/search?kind=${kind}&q=${encodeURIComponent(q)}`);
@@ -180,15 +195,21 @@ $('#coversearch').addEventListener('submit', async (ev) => {
     if (c.thumb_url) { const im = document.createElement('img'); im.src = c.thumb_url; im.width = 46; im.alt = ''; li.append(im); }
     const label = document.createElement('span'); label.textContent = ` ${c.title}${c.year ? ` (${c.year})` : ''} `;
     const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = 'Use this cover';
-    btn.onclick = () => setCover(c.cover_url);
+    btn.onclick = async () => {
+      await setCover(c.cover_url);
+      // Picking the record is also saying which record this is: fill the provider id (and year) in the form.
+      const f = form.elements;
+      if (!f.external_id.value.trim()) { f.external_id.value = c.id; if (!f.year.value && c.year) f.year.value = c.year; msg('Cover updated ✓ and the provider id filled in: press Save to keep it', 'ok'); }
+    };
     li.append(label, btn); ul.append(li);
   }
-});
+}
 
 const dlg = $('#confirm');
 $('#askdel').onclick = () => dlg.showModal();
 $('#cancel').onclick = () => dlg.close();
 $('#dodel').onclick = async () => {
+  msg('Deleting…');
   const r = await fetch(`/admin/api/entries/${kind}/${slug}`, { method: 'DELETE' });
   if (r.ok) location.href = '/admin'; else { dlg.close(); msg(`Delete failed: ${r.status}`); }
 };
@@ -299,9 +320,10 @@ pub fn edit_page(e: &Entry, cover_url: Option<String>) -> Markup {
             a href={"/entry/" (e.kind.as_str()) "/" (e.slug)} { "View public page" }
             " · " (e.kind.as_str())
         }
-        p #msg role="status" {}
+        p #msg role="status" aria-live="polite" {}
+        div.edit {
         div #coverbox {
-            @if let Some(u) = &cover_url { img #coverimg.cover src=(u) alt=""; }
+            @if let Some(u) = &cover_url { img #coverimg.cover src=(u) alt=""; } @else { div #coverph.cover.ph {} }
             label { "Upload or replace cover " input #coverfile type="file" accept="image/*"; }
             details {
                 summary { "Find a cover (search " (e.kind.as_str()) " sources)" }
@@ -314,29 +336,32 @@ pub fn edit_page(e: &Entry, cover_url: Option<String>) -> Markup {
             details {
                 summary { "Use a link to an image" }
                 form #coverlink.row {
-                    input #coverurl type="url" placeholder="https://…/poster.jpg" size="48" required;
+                    input #coverurl type="url" placeholder="https://…/poster.jpg" required;
                     button type="submit" { "Use link" }
                 }
             }
         }
         form #edit data-kind=(e.kind.as_str()) data-slug=(e.slug) {
-            label { "Title " input name="title" value=(e.title) required; }
-            label { "Status "
-                select name="status" {
-                    @for st in ["wanted", "in_progress", "consumed"] {
-                        option value=(st) selected[st == e.status.as_str()] { (st) }
+            div.fields {
+                label.wide { "Title " input name="title" value=(e.title) required; }
+                label { "Status "
+                    select name="status" {
+                        @for st in ["wanted", "in_progress", "consumed"] {
+                            option value=(st) selected[st == e.status.as_str()] { (st) }
+                        }
                     }
                 }
+                label { "Date logged " input name="consumed_at" type="date" value=(e.consumed_at.clone().unwrap_or_default()); }
+                label { "Rating (1-10) " input name="rating" type="number" min="1" max="10" value=(e.rating.map(|r| r.to_string()).unwrap_or_default()); }
+                label { "Year " input name="year" type="number" value=(e.year.map(|y| y.to_string()).unwrap_or_default()); }
+                label.wide { (provider_name(e.kind)) " id " input name="external_id" value=(e.external_id.clone().unwrap_or_default()) placeholder="optional, e.g. a TMDB id"; }
+                label.wide { "Review " textarea name="review" rows="8" { (e.review.clone().unwrap_or_default()) } }
             }
-            label { "Rating (1-10) " input name="rating" type="number" min="1" max="10" value=(e.rating.map(|r| r.to_string()).unwrap_or_default()); }
-            label { "Year " input name="year" type="number" value=(e.year.map(|y| y.to_string()).unwrap_or_default()); }
-            label { (provider_name(e.kind)) " id " input name="external_id" value=(e.external_id.clone().unwrap_or_default()) placeholder="optional, e.g. a TMDB id" size="20"; }
-            label { "Date logged " input name="consumed_at" type="date" value=(e.consumed_at.clone().unwrap_or_default()); }
-            label { "Review " textarea name="review" rows="8" cols="60" { (e.review.clone().unwrap_or_default()) } }
             div.row {
                 button type="submit" { "Save" }
                 button #askdel.danger type="button" { "Delete…" }
             }
+        }
         }
         dialog #confirm {
             h2 { "Delete this entry?" }
