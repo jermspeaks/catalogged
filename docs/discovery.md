@@ -12,6 +12,9 @@
 - [ ] Placeholder image
 - [ ] bulk cover finder
 - [ ] Unique check - no need for adding re-watches, re-plays, etc.
+- [ ] Form feedback in edit details page (like a toast message or something, or even loading state).
+- [ ] When fetching covers, auto-fill the tmdbid as well.
+- [ ] The edit form page needs better grid layout (everything is single line vertical)
 
 ## Testing (done: see e2e/ and README)
 
