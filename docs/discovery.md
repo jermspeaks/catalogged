@@ -1,21 +1,10 @@
 # Discovery
 
-## Missing features
+Ideas and reference material. Every idea here has been triaged (2026-11-23): finished ones are in [completed.md](completed.md) and open ones are in [plan.md](plan.md). Add new ideas as a checklist below, and they get triaged the same way.
 
-- [x] Seed the initial database with the collections.
-- [x] Adding a dark mode and system selection (system chooses light or dark)
-- [x] Favicon and manifest.json
-- [x] Dark and system mode theme selection for admin pages
-- [x] link back to main page from admin
-- [x] edit button for each details page (and since it's redirect for admin, nobody in public will have access to it)
-- [x] In the edit details page, we can also delete, which needs to be behind a dialog to be sure I want to delete it
-- [ ] Placeholder image
-- [ ] bulk cover finder
-- [ ] Unique check - no need for adding re-watches, re-plays, etc.
+## New ideas
 
-## Testing (done: see e2e/ and README)
-
-Add e2e testing on a dev version where we can do all of the admin functions, and the read functions on the public website
+_None open._
 
 ## Color palette
 
