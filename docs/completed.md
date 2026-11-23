@@ -2,14 +2,15 @@
 
 What has been built, in order. For what is left, see [plan.md](plan.md). For the free-tier rules every change must respect, see [free-tier.md](free-tier.md).
 
-_Last reviewed: 2026-11-23._
+_Last reviewed: 2026-11-23, after PR #16._
 
 ## Status at a glance
 
 | Area | State |
 |---|---|
-| Code on `main` | Everything below, through PR #3 |
-| Production | Running the PR #2 code at https://catalog.05152024.xyz. **PR #3 is merged but not deployed, and D1 migration `0002` is not yet applied remotely** |
+| Code on `main` | Everything below, through PR #16 |
+| Production | Deployed from `main` (PR #16) at https://catalog.05152024.xyz; `workers.dev` and preview URLs are off. All migrations applied |
+| Data | The 2010 log is imported (75 entries); 79 entries in total, about 44 with covers and 42 with a provider id. Later years not yet imported |
 | Infrastructure | D1 `catalogged`, R2 `catalogged-covers`, Worker `catalogged`, Access in front of `/admin`, billing alert set, Workers Free plan |
 
 ## Infrastructure and security
@@ -17,7 +18,7 @@ _Last reviewed: 2026-11-23._
 - Cloudflare D1 database and R2 bucket created; Worker deployed on the custom domain `catalog.05152024.xyz`. The `workers.dev` URLs are switched off.
 - Cloudflare Access protects `admin` and `admin/*` on the custom domain: an **Allow** policy for the owner's email and a **Service Auth** policy for the CLI's service token. The public site is open.
 - `ADMIN_ENABLED` kill switch (secret): every admin route returns 503 unless it is `1`. It is a backstop, not a replacement for Access.
-- Secrets set on the Worker: `ADMIN_ENABLED`, `TMDB_API_KEY`.
+- Secrets set on the Worker: `ADMIN_ENABLED`, `TMDB_API_KEY`. `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` are plain vars in `wrangler.toml` (identifiers, not secrets). IGDB secrets for admin game search are not set (the CLI does not need them).
 - Free-tier budget documented with guard rules ([free-tier.md](free-tier.md)), a 300 KB cover cap enforced server-side, and a low billing alert in the dashboard.
 
 ## Code, by PR
@@ -53,7 +54,31 @@ _Last reviewed: 2026-11-23._
 ### PR #9: admin gaps, public fixes
 - Add by id, manual add, edit page with cover upload and confirmed delete, admin theme and navigation, favicon and manifest, content-hashed covers, cover aspect ratio fix on the grid.
 
+### PRs #10 to #12: e2e tests, hardening, workers.dev off
+- `e2e/`: Playwright against a local `wrangler dev` with a throwaway D1/R2 and a fake Access issuer; providers mocked (see README).
+- Access JWT verified inside the Worker for every `/admin` route (fails closed); `scripts/backup.sh`, Time Travel and the monitoring checklist in `docs/operations.md`.
+- `workers_dev = false` and `preview_urls = false`, so a deploy cannot re-enable the `workers.dev` URL.
+
+### PRs #13 to #16: matching, covers, provider ids, cache purge
+- `catalogged match in.csv out.csv`: finds provider ids for id-less rows, with a review column (`high` / `check` / `none`). Picking logic in `crates/core/src/matching.rs`.
+- Edit page: Find a cover (provider search) and Use a link to an image (Worker relay `/admin/api/image`: https public hosts, images only, 10 MB cap).
+- `catalogged covers` (bulk cover finder for cover-less entries; ignores records newer than the logged year) and `--ids-only` (backfill ids). `PUT` on an entry now takes `source` and `external_id`; the edit page has a provider-id field.
+- Writes purge the cached public pages they change (per data centre); the e2e suite runs with the cache on.
+
+## Discovery items done (triaged 2026-11-23)
+
+- Seed the initial database (2010 imported; later years in plan.md).
+- Dark mode with system selection; theme picker on public and admin pages.
+- Favicon and manifest.
+- Link back to the public site from admin; Edit button on each detail page.
+- Delete from the edit page behind a confirm dialog.
+- E2E testing on a dev version covering the admin and public pages.
+- Colour palette applied (see discovery.md).
+- Bulk cover finder (`catalogged covers`).
+- Duplicates are rejected: the database enforces one entry per slug and per provider id, and the admin shows the 409. (A warning *before* adding is still open in plan.md.)
+
 ## Known gaps in what is "done"
 
-- The admin page's JavaScript (search, Add, canvas WebP, edit, delete) has never been run in a browser by the author of the code. The endpoints it calls were tested; the page itself needs a manual click-through.
+- The admin JavaScript is covered by e2e tests with providers mocked; real provider responses in the browser (TMDB / Open Library / IGDB search from `/admin`) have only been exercised by the owner.
+- The manual-cover backup path in `scripts/backup.sh` is untested (no manually uploaded covers existed when it was written).
 - Public pages are purged on every admin write (home, kind pages, `/index.json`, the entry page, replaced cover paths), in the data centre that handled the write; other locations expire on the normal TTL.
