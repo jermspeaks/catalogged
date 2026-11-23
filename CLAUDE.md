@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Deployed at https://catalog.05152024.xyz (custom domain only; workers.dev is off). TMDB metadata and covers, edge caching, and a first admin UI exist. Open Library and IGDB providers, edit/delete, and richer public pages are still to do. See `docs/plan.md` for the roadmap and `README.md` for setup.
+Deployed at https://catalog.05152024.xyz (custom domain only; workers.dev is off). TMDB metadata and covers, edge caching, and a first admin UI exist. Open Library and IGDB providers, edit/delete, and richer public pages are still to do. See `docs/completed.md` for what exists, `docs/plan.md` for the remaining roadmap and decisions, and `README.md` for setup.
 
 ## Commands
 

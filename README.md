@@ -2,7 +2,7 @@
 
 A personal catalogue of games, books, TV shows and movies: what I've consumed and what I want to. Inspired by [erika.florist/catalogue](https://erika.florist/catalogue/).
 
-Rust on Cloudflare (Workers + D1 + R2), server-rendered, designed to run on the free tier. See [docs/plan.md](docs/plan.md) for the architecture and roadmap.
+Rust on Cloudflare (Workers + D1 + R2), server-rendered, designed to run on the free tier. See [docs/completed.md](docs/completed.md) for what is built, [docs/plan.md](docs/plan.md) for what is left, and [docs/free-tier.md](docs/free-tier.md) for the budget rules.
 
 ## Layout
 
@@ -12,7 +12,7 @@ Rust on Cloudflare (Workers + D1 + R2), server-rendered, designed to run on the 
 | `crates/worker` | Cloudflare Worker (axum + maud + D1 + R2): cached public pages, covers, and the `/admin` UI + API |
 | `crates/cli` | `catalogged` CLI: search TMDB, add single entries, bulk import, upload covers |
 | `migrations/` | D1 SQL migrations |
-| `docs/` | Plan and design notes |
+| `docs/` | `completed.md` (built so far), `plan.md` (remaining work and decisions), `free-tier.md` (budget guards) |
 
 ## Prerequisites
 
