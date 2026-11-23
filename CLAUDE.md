@@ -14,6 +14,7 @@ cargo check -p catalogged-worker --target wasm32-unknown-unknown   # the worker 
 cargo build -p catalogged-cli                      # binary is `catalogged`
 cd crates/worker && wrangler dev                   # run locally (needs worker-build, wrangler, and crates/worker/.dev.vars)
 cd crates/worker && wrangler d1 migrations apply catalogged --local
+cd e2e && npm test                                 # end-to-end tests (Playwright) against a local wrangler dev with a throwaway D1/R2
 ```
 
 ## Layout
@@ -24,6 +25,7 @@ cd crates/worker && wrangler d1 migrations apply catalogged --local
 - Providers: URL building and JSON parsing live in `crates/core/src/{tmdb,openlibrary,igdb}.rs`, all returning the shared `Candidate` (`cover_url`, `thumb_url`); the CLI and Worker each do their own HTTP. The Worker holds `TMDB_API_KEY` and `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` as secrets for the admin search proxy. Source per kind: movie/show = tmdb, book = open_library (work id), game = igdb.
 - `/index.json` (compact entries, built in SQLite) feeds client-side search/filter/sort on `/`; the script and palette/dark-mode CSS live in `crates/worker/src/public_ui.rs`.
 - Public GETs (not `/admin`) are cached with the Cache API in the `fetch` entrypoint; a response is cached only if it sets `Cache-Control`. Public changes can lag up to 5 minutes.
+- `e2e/`: Playwright tests that start `wrangler dev` themselves (state in `e2e/.state`, wiped each run; port 8788). Providers are mocked in the browser, so no external services or keys are needed. `DISABLE_CACHE=1` (set only by the e2e config) turns off the Cache API so writes show up immediately. Add a test when you add an admin or public feature.
 - The admin UI and CLI share one write endpoint so validation lives in the Worker.
 
 ## What this is

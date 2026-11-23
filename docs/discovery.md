@@ -10,7 +10,7 @@
 - [x] edit button for each details page (and since it's redirect for admin, nobody in public will have access to it)
 - [x] In the edit details page, we can also delete, which needs to be behind a dialog to be sure I want to delete it
 
-## Testing
+## Testing (done: see e2e/ and README)
 
 Add e2e testing on a dev version where we can do all of the admin functions, and the read functions on the public website
 

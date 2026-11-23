@@ -12,6 +12,7 @@ body{font:16px/1.5 system-ui,sans-serif;max-width:64rem;margin:0 auto;padding:1.
 a{color:var(--accent)}
 header.top{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
 h1{margin:.2em 0}
+#controls[hidden]{display:none}
 #controls{display:flex;gap:.5rem;flex-wrap:wrap;margin:1rem 0}
 #controls input,#controls select,#theme,button.more{font:inherit;padding:.4rem .6rem;border:1px solid var(--line);border-radius:.4rem;background:var(--card);color:var(--fg)}
 #controls input{flex:1 1 12rem}
