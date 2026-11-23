@@ -79,6 +79,10 @@ async fn create_entry(
     State(state): State<AppState>,
     Json(new): Json<NewEntry>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Kill switch: admin stays off until ADMIN_ENABLED=1 is set (after Cloudflare Access is in front).
+    if state.env.var("ADMIN_ENABLED").map(|v| v.to_string()).ok().as_deref() != Some("1") {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "admin disabled".into()));
+    }
     let err = |e: Error| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
     let db = state.env.d1("DB").map_err(err)?;
     let slug = slugify(&new.title);
