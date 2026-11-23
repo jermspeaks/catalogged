@@ -29,7 +29,8 @@ type ApiErr = (StatusCode, String);
 
 /// Public pages and covers are cached at the edge for this long (keeps D1/R2 reads near zero).
 const PUBLIC_CACHE: &str = "public, max-age=300";
-const COVER_CACHE: &str = "public, max-age=86400";
+/// Cover keys contain a content hash, so a changed cover always gets a new URL.
+const COVER_CACHE: &str = "public, max-age=31536000, immutable";
 
 /// Where a cover is fetched from. With `COVERS_BASE_URL` set (the public R2 domain) images skip the
 /// Worker entirely, so they do not count against the 100k/day Worker request cap. Otherwise the
@@ -45,6 +46,8 @@ fn router(env: Env) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/index.json", get(index_json))
+        .route("/favicon.svg", get(|| async { ([(header::CONTENT_TYPE, "image/svg+xml"), (header::CACHE_CONTROL, "public, max-age=86400")], public_ui::FAVICON_SVG) }))
+        .route("/manifest.webmanifest", get(|| async { ([(header::CONTENT_TYPE, "application/manifest+json"), (header::CACHE_CONTROL, "public, max-age=86400")], public_ui::MANIFEST) }))
         .route("/entry/{kind}/{slug}", get(entry_page))
         .route("/covers/{kind}/{file}", get(serve_cover))
         .route("/healthz", get(|| async { "ok" }))
@@ -52,7 +55,9 @@ fn router(env: Env) -> Router {
         // additionally by the ADMIN_ENABLED kill switch.
         .route("/admin", get(admin_page))
         .route("/admin/", get(admin_page))
+        .route("/admin/edit/{kind}/{slug}", get(admin_edit_page))
         .route("/admin/api/search", get(search))
+        .route("/admin/api/lookup", get(lookup))
         .route("/admin/api/entries", post(create_entry))
         .route(
             "/admin/api/entries/{kind}/{slug}",
@@ -129,21 +134,13 @@ fn layout(title: &str, body: Markup) -> Markup {
                 title { (title) }
                 script { (maud::PreEscaped(public_ui::THEME_INIT)) }
                 style { (maud::PreEscaped(public_ui::CSS)) }
+                (maud::PreEscaped(public_ui::FAVICON_LINKS))
             }
-            body { (body) }
+            body { (body) script { (maud::PreEscaped(public_ui::THEME_JS)) } }
         }
     }
 }
 
-fn theme_picker() -> Markup {
-    html! {
-        select #theme aria-label="Theme" {
-            option value="auto" { "Theme: system" }
-            option value="light" { "Light" }
-            option value="dark" { "Dark" }
-        }
-    }
-}
 
 const COLS: &str =
     "id, kind, slug, title, status, rating, review, year, source, external_id, cover_key, consumed_at";
@@ -234,7 +231,7 @@ async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Axu
     let page_html = layout(
         "catalogged",
         html! {
-            header.top { h1 { "catalogged" } (theme_picker()) }
+            header.top { h1 { "catalogged" } (public_ui::theme_picker()) }
             form #controls hidden {
                 input type="search" name="q" placeholder="Search titles" aria-label="Search titles" autocomplete="off";
                 select name="kind" aria-label="Kind" {
@@ -293,8 +290,9 @@ async fn entry_page(State(state): State<AppState>, Path((kind, slug)): Path<(Str
     let page_html = layout(
         &e.title,
         html! {
-            p { a href="/" { "← all" } }
+            header.top { p { a href="/" { "← all" } } (public_ui::theme_picker()) }
             h1 { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
+            p { small { a href={"/admin/edit/" (e.kind.as_str()) "/" (e.slug)} { "Edit" } } }
             @if let Some(key) = &e.cover_key { img.cover src=(cover_src(&e_env, key)) alt="" width="300" height="450"; }
             p {
                 (e.kind.as_str()) " · " (e.status.as_str())
@@ -339,6 +337,62 @@ async fn admin_page(State(state): State<AppState>, Query(lq): Query<ListQuery>) 
     let q = lq.q.as_deref().map(str::trim).unwrap_or("");
     let (entries, more) = load_entries(&state.env, None, Some(q), page).await.map_err(internal)?;
     Ok(Html(admin_ui::page(&entries, page, more, q).into_string()))
+}
+
+#[worker::send]
+async fn admin_edit_page(State(state): State<AppState>, Path((kind, slug)): Path<(String, String)>) -> Result<Html<String>, ApiErr> {
+    admin_guard(&state.env)?;
+    let Some(e) = find_entry(&state.env, &kind, &slug).await.map_err(internal)? else {
+        return Err((StatusCode::NOT_FOUND, "no such entry".into()));
+    };
+    let cover = e.cover_key.as_deref().map(|k| cover_src(&state.env, k));
+    Ok(Html(admin_ui::edit_page(&e, cover).into_string()))
+}
+
+#[derive(Deserialize)]
+struct LookupQuery {
+    kind: Kind,
+    id: String,
+}
+
+#[derive(serde::Serialize)]
+struct Lookup {
+    kind: Kind,
+    #[serde(flatten)]
+    candidate: catalogged_core::Candidate,
+}
+
+/// Fetch one record by provider id, so the admin can add by id. An IMDb id (`tt...`) resolves via
+/// TMDB and may turn out to be a show even if "movie" was picked, so the real kind is returned.
+#[worker::send]
+async fn lookup(State(state): State<AppState>, Query(q): Query<LookupQuery>) -> Result<Json<Lookup>, ApiErr> {
+    admin_guard(&state.env)?;
+    let id = q.id.trim();
+    let bad = |m: &str| (StatusCode::BAD_REQUEST, m.to_string());
+    let (kind, candidate) = match q.kind {
+        Kind::Movie | Kind::Show if tmdb::is_imdb_id(id) => {
+            let body = tmdb_get(&state.env, tmdb::find_url(id)).await.map_err(internal)?;
+            tmdb::parse_find(&body).map_err(internal)?.ok_or_else(|| bad("TMDB has no movie or show for that IMDb id"))?
+        }
+        Kind::Movie | Kind::Show => {
+            let url = tmdb::details_url(q.kind, id).ok_or_else(|| bad("unsupported kind"))?;
+            (q.kind, tmdb::parse_details(&tmdb_get(&state.env, url).await.map_err(internal)?).map_err(internal)?)
+        }
+        Kind::Book => {
+            let body = open_library_get(&openlibrary::details_url(id)).await.map_err(internal)?;
+            (Kind::Book, openlibrary::parse_details(&body).map_err(internal)?)
+        }
+        Kind::Game => {
+            let body = igdb::details_body(id).ok_or_else(|| bad("IGDB ids are numbers"))?;
+            let game = igdb::parse_games(&igdb_post(&state.env, body).await.map_err(internal)?)
+                .map_err(internal)?
+                .into_iter()
+                .next()
+                .ok_or_else(|| bad("IGDB has no game with that id"))?;
+            (Kind::Game, game)
+        }
+    };
+    Ok(Json(Lookup { kind, candidate }))
 }
 
 #[worker::send]
@@ -560,20 +614,22 @@ async fn put_cover(
     }
     let db = state.env.d1("DB").map_err(internal)?;
     let exists = db
-        .prepare("SELECT 1 AS x FROM entries WHERE kind = ?1 AND slug = ?2")
+        .prepare("SELECT cover_key FROM entries WHERE kind = ?1 AND slug = ?2")
         .bind(&[kind.clone().into(), slug.clone().into()])
         .map_err(internal)?
         .first::<serde_json::Value>(None)
         .await
         .map_err(internal)?;
-    if exists.is_none() {
+    let Some(existing) = exists else {
         return Err((StatusCode::NOT_FOUND, "no such entry".into()));
-    }
-    let key = format!("{kind}/{slug}.webp");
-    state
-        .env
-        .bucket("COVERS")
-        .map_err(internal)?
+    };
+    let old_key = existing.get("cover_key").and_then(|v| v.as_str()).map(str::to_owned);
+    // Content-hashed key: replacing a cover writes a new URL, so the immutable CDN cache never
+    // serves a stale image. FNV-1a over <= 300 KB is far under the CPU limit.
+    let hash = body.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x100000001b3));
+    let key = format!("{kind}/{slug}-{:08x}.webp", hash & 0xffff_ffff);
+    let bucket = state.env.bucket("COVERS").map_err(internal)?;
+    bucket
         .put(&key, body.to_vec())
         .http_metadata(HttpMetadata {
             content_type: Some("image/webp".into()),
@@ -589,5 +645,9 @@ async fn put_cover(
         .run()
         .await
         .map_err(internal)?;
-    Ok(Json(serde_json::json!({ "cover_key": key })))
+    if let Some(old) = old_key.filter(|o| *o != key) {
+        // Best effort: a failed delete only leaves one orphan object.
+        let _ = bucket.delete(old).await;
+    }
+    Ok(Json(serde_json::json!({ "cover_key": key, "url": cover_src(&state.env, &key) })))
 }

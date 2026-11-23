@@ -72,4 +72,4 @@ CSV columns: `kind,title,status,rating,review,year,source,external_id,consumed_a
 
 ## Admin UI
 
-`/admin` (behind Cloudflare Access): search (movies, shows, books, games), pick a result, choose a status (and optionally a date; consumed defaults to today), and Add. Every entry in the list below has an edit form (title, status, rating, year, date logged, review) and a Delete button; the list is paginated and filterable by title. The browser converts the poster to WebP with a canvas and uploads it. Game search in production needs the IGDB Worker secrets (see docs/plan.md item 5).
+`/admin` (behind Cloudflare Access): search (movies, shows, books, games) and Add; Add by id (TMDB, IMDb `tt...`, Open Library work id, IGDB id); Add manually with an optional cover file. Each catalogue row opens an edit page with every field, a cover upload/replace, and Delete behind a confirm dialog. The browser converts covers to WebP with a canvas (scaled to <= 500 px wide) and uploads them. Game search in production needs the IGDB Worker secrets (see docs/plan.md item 5).
