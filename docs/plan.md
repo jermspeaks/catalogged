@@ -85,12 +85,9 @@ At personal-site traffic both are fine; the bucket domain mainly buys headroom a
 - Optional: purge the cached public pages for an entry after an edit or delete.
 
 ### 7. Public site: grid, filter, sort, search
-- Keep server-rendered pages (they work without JS and cache well) and add controls for **filter** (kind, status), **sort** (recently logged, title, year, rating) and **search by title**.
-- **Search must not hit D1 per query.** A `LIKE '%term%'` cannot use an index, so every search scans the table: at 5,000 rows, about 1,000 searches a day would use the entire 5M rows/day read budget.
-- **Proposed approach:** one cached `/index.json` with a compact record per entry (id, kind, slug, title, status, year, rating, cover key, date). The browser loads it once and does search, filter and sort locally, with no D1 reads per interaction. Rough size at 5k entries: ~0.5 MB raw, much less compressed (estimates).
-- **Risk to measure first:** building that JSON must fit the Worker's ~10 ms CPU limit. Decoding 5k rows in Rust may not; having SQLite emit the JSON itself (`json_group_array(json_array(...))`, returning one string) avoids per-row decoding. Prototype and measure; if it does not fit, fall back to SQLite FTS5.
-- **FTS5 is unverified for D1:** the docs I checked confirm FTS5 for Durable Object SQLite, not D1 specifically. Test on a real D1 database before depending on it.
-- Basic counts per kind and status are a cheap extra from the same index.
+- Built (first cut): `/index.json` (one compact JSON array per entry, assembled by SQLite so the Worker does not decode rows; cached 15 min, so a cache miss reads the table once, about 5k rows at the limit). A small script on `/` loads it once and does search, kind/status filter and sort (recent, date logged, title, year, rating) in the browser, with "Show more" in batches of 60 and the state kept in the URL. The server-rendered first page and kind links remain as the no-JS fallback. Zero D1 reads per interaction.
+- Built: palette from discovery.md, dark mode following the system, with a Theme picker (system / light / dark) saved in `localStorage`.
+- Still to do: measure the real `/index.json` CPU time and size with a few thousand rows (seed first); not yet exercised in a browser; richer detail pages; per-kind and per-status counts; lazy cover sizing. FTS5 on D1 stays unverified and is only a fallback if the JSON approach proves too heavy.
 
 ### 8. Hardening and operations
 - Verify the Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`) inside the Worker as defense in depth, so a misconfigured Access app cannot expose `/admin`.

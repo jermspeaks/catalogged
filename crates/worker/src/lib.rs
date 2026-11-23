@@ -1,4 +1,5 @@
 mod admin_ui;
+mod public_ui;
 
 use axum::{
     body::Bytes,
@@ -43,6 +44,7 @@ fn cover_src(env: &Env, key: &str) -> String {
 fn router(env: Env) -> Router {
     Router::new()
         .route("/", get(home))
+        .route("/index.json", get(index_json))
         .route("/entry/{kind}/{slug}", get(entry_page))
         .route("/covers/{kind}/{file}", get(serve_cover))
         .route("/healthz", get(|| async { "ok" }))
@@ -125,9 +127,20 @@ fn layout(title: &str, body: Markup) -> Markup {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { (title) }
-                style { (maud::PreEscaped("body{font:16px system-ui;max-width:60rem;margin:2rem auto;padding:0 1rem}ul.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(9rem,1fr));gap:1rem;padding:0;list-style:none}.grid img{width:100%;aspect-ratio:2/3;object-fit:cover;background:#ddd}.grid li{font-size:.85rem}")) }
+                script { (maud::PreEscaped(public_ui::THEME_INIT)) }
+                style { (maud::PreEscaped(public_ui::CSS)) }
             }
             body { (body) }
+        }
+    }
+}
+
+fn theme_picker() -> Markup {
+    html! {
+        select #theme aria-label="Theme" {
+            option value="auto" { "Theme: system" }
+            option value="light" { "Light" }
+            option value="dark" { "Dark" }
         }
     }
 }
@@ -181,6 +194,29 @@ struct ListQuery {
     q: Option<String>,
 }
 
+/// Compact JSON of every entry for client-side search/filter/sort. SQLite builds the string so the
+/// Worker never decodes thousands of rows (10 ms CPU limit). Cached for 15 min: a cache miss reads
+/// the whole table once, so this bounds the D1 read cost (~5k rows per miss).
+#[worker::send]
+async fn index_json(State(state): State<AppState>) -> AxumResponse {
+    let q = "SELECT json_group_array(json(a)) AS j FROM (SELECT json_array(kind, slug, title, status, rating, year, cover_key, consumed_at, updated_at) AS a FROM entries ORDER BY updated_at DESC)";
+    let row = async {
+        state.env.d1("DB")?.prepare(q).first::<serde_json::Value>(None).await
+    }
+    .await;
+    let items = match row {
+        Ok(Some(v)) => v.get("j").and_then(|j| j.as_str()).unwrap_or("[]").to_owned(),
+        Ok(None) => "[]".into(),
+        Err(e) => return internal(e).into_response(),
+    };
+    let body = format!(r#"{{"covers":{},"items":{items}}}"#, serde_json::json!(cover_src(&state.env, "")));
+    (
+        [(header::CONTENT_TYPE, "application/json"), (header::CACHE_CONTROL, "public, max-age=900")],
+        body,
+    )
+        .into_response()
+}
+
 #[worker::send]
 async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> AxumResponse {
     let page = lq.page.unwrap_or(1).clamp(1, MAX_PAGE);
@@ -198,12 +234,33 @@ async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Axu
     let page_html = layout(
         "catalogged",
         html! {
-            h1 { "catalogged" }
-            nav {
+            header.top { h1 { "catalogged" } (theme_picker()) }
+            form #controls hidden {
+                input type="search" name="q" placeholder="Search titles" aria-label="Search titles" autocomplete="off";
+                select name="kind" aria-label="Kind" {
+                    option value="" { "All kinds" }
+                    @for k in [Kind::Movie, Kind::Show, Kind::Game, Kind::Book] { option value=(k.as_str()) { (k.as_str()) "s" } }
+                }
+                select name="status" aria-label="Status" {
+                    option value="" { "Any status" }
+                    option value="consumed" { "Consumed" }
+                    option value="in_progress" { "In progress" }
+                    option value="wanted" { "Wanted" }
+                }
+                select name="sort" aria-label="Sort" {
+                    option value="recent" { "Recently updated" }
+                    option value="logged" { "Date logged" }
+                    option value="title" { "Title" }
+                    option value="year" { "Year" }
+                    option value="rating" { "Rating" }
+                }
+            }
+            p #count {}
+            nav #nav {
                 a href="/" { "all" }
                 @for k in [Kind::Movie, Kind::Show, Kind::Game, Kind::Book] { " · " a href={"/?kind=" (k.as_str())} { (k.as_str()) "s" } }
             }
-            ul.grid {
+            ul.grid #grid {
                 @for e in &entries {
                     li {
                         a href={"/entry/" (e.kind.as_str()) "/" (e.slug)} {
@@ -214,11 +271,12 @@ async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Axu
                     }
                 }
             }
-            p {
+            p #pager {
                 @if page > 1 { a href=(link(lq.kind, page - 1)) { "← newer" } }
                 @if page > 1 && more { " · " }
                 @if more { a href=(link(lq.kind, page + 1)) { "older →" } }
             }
+            script { (maud::PreEscaped(public_ui::GRID_JS)) }
         },
     );
     ([(header::CACHE_CONTROL, PUBLIC_CACHE)], Html(page_html.into_string())).into_response()
@@ -237,7 +295,7 @@ async fn entry_page(State(state): State<AppState>, Path((kind, slug)): Path<(Str
         html! {
             p { a href="/" { "← all" } }
             h1 { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
-            @if let Some(key) = &e.cover_key { img src=(cover_src(&e_env, key)) alt="" width="300" height="450"; }
+            @if let Some(key) = &e.cover_key { img.cover src=(cover_src(&e_env, key)) alt="" width="300" height="450"; }
             p {
                 (e.kind.as_str()) " · " (e.status.as_str())
                 @if let Some(r) = e.rating { " · " (r) "/10" }
