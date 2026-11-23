@@ -4,7 +4,7 @@
     python3 -I scripts/log2csv.py <log.md> <year> <out.csv>
 
 Reads lines like `- 01 🎥 Title (2010) (MOVIE)`, `- 19 📕 Title by Author`, `- 12 🎮 Title (1992)` and
-`- 24 📺 Title, Season 3 (2023-2024)` under `## Month YYYY` headings. TMDB links, Letterboxd links and
+`- 24 📺 Title, Season 3 (2023-2024)` under `## Month YYYY` (or, from 2016, `## Month`) headings. TMDB links, Letterboxd links and
 the 🔁 rewatch mark are understood. The day in old years is a placeholder (the log says the day was never
 tracked), so dates are only month-accurate. Output columns: kind,title,status,rating,review,year,source,
 external_id,consumed_at,creator. Generated sheets contain personal data: keep them in `seeds/` (gitignored).
@@ -23,8 +23,8 @@ def parse(src: str, year: str) -> list[dict]:
     rows, month = [], None
     for line in open(src, encoding="utf-8"):
         line = line.rstrip("\n")
-        h = re.match(r"## (\w+) (\d{4})", line)
-        if h and h.group(1) in MONTHS and h.group(2) == year:
+        h = re.match(r"## (\w+)(?: (\d{4}))?\s*$", line)
+        if h and h.group(1) in MONTHS and h.group(2) in (None, year):
             month = MONTHS[h.group(1)]
             continue
         m = re.match(r"- (\d{2}) (🎥|📕|🎮|📺)\s*(🔁\s*)?(.*)$", line)
@@ -37,6 +37,7 @@ def parse(src: str, year: str) -> list[dict]:
         rest = re.sub(r"\s*\[[^\]]*\]\([^)]*\)", "", rest)
         rest = re.sub(r"\s*\[[^\]]*\]\S*", "", rest)
         rest = re.sub(r"\s*\((MOVIE|SHOW|TV|BOOK|GAME)\)\s*$", "", rest).strip()
+        rest = re.sub(r"\\([^\w\s])", r"\1", rest)  # markdown escapes such as Slide\:ology
         creator = ""
         if kind == "book" and " by " in rest:
             rest, creator = rest.rsplit(" by ", 1)
