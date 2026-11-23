@@ -8,9 +8,9 @@ Rust on Cloudflare (Workers + D1 + R2), server-rendered, designed to run on the 
 
 | Path | What |
 |---|---|
-| `crates/core` | Shared types (`Entry`, `NewEntry`, `Kind`, `Status`), `slugify`, and TMDB URL/parse helpers |
+| `crates/core` | Shared types (`Entry`, `NewEntry`, `Kind`, `Status`), `slugify`, and TMDB, Open Library and IGDB URL/parse helpers |
 | `crates/worker` | Cloudflare Worker (axum + maud + D1 + R2): cached public pages, covers, and the `/admin` UI + API |
-| `crates/cli` | `catalogged` CLI: search TMDB, add single entries, bulk import, upload covers |
+| `crates/cli` | `catalogged` CLI: search providers, add single entries, bulk import, upload covers |
 | `migrations/` | D1 SQL migrations |
 | `docs/` | `completed.md` (built so far), `plan.md` (remaining work and decisions), `free-tier.md` (budget guards) |
 
@@ -19,7 +19,7 @@ Rust on Cloudflare (Workers + D1 + R2), server-rendered, designed to run on the 
 - Rust (the `wasm32-unknown-unknown` target is installed via `rust-toolchain.toml`)
 - Node + `wrangler` (`npm i -g wrangler`), logged in with `wrangler login`
 - `cargo install worker-build`
-- A TMDB API key; an IGDB key (Twitch client id/secret) when games are wired up
+- A TMDB API key; an IGDB key (Twitch client id/secret) for games; books need no key
 
 ## Develop
 
@@ -28,7 +28,7 @@ cargo test -p catalogged-core                              # shared-crate tests
 cargo check -p catalogged-worker --target wasm32-unknown-unknown
 
 cd crates/worker
-cp .dev.vars.example .dev.vars                             # then fill in TMDB_API_KEY
+cp .dev.vars.example .dev.vars                             # then fill in TMDB_API_KEY (and IGDB_CLIENT_ID/SECRET for game search)
 wrangler d1 migrations apply catalogged --local            # create the local DB
 wrangler dev                                               # run the Worker locally (admin at /admin)
 ```
@@ -54,10 +54,12 @@ Then:
 
 ## CLI
 
-Copy `.env.example` to `.env` (gitignored) and fill it in: `CATALOGGED_URL`, the Access service token (`CF_SERVICE_CLIENT_ID`/`CF_SERVICE_CLIENT_SECRET`), and `TMDB_API_KEY`. The CLI loads `.env` automatically.
+Copy `.env.example` to `.env` (gitignored) and fill it in: `CATALOGGED_URL`, the Access service token (`CF_SERVICE_CLIENT_ID`/`CF_SERVICE_CLIENT_SECRET`), `TMDB_API_KEY`, and `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` for games. The CLI loads `.env` automatically.
 
 ```sh
-cargo run -p catalogged-cli -- search --kind movie "10 things i hate about you"   # find a TMDB id
+cargo run -p catalogged-cli -- search --kind movie "10 things i hate about you"   # find an id (kinds: movie, show, book, game)
+cargo run -p catalogged-cli -- add --kind book --external-id OL20893680W --status wanted   # Open Library work id
+cargo run -p catalogged-cli -- add --kind game --external-id 113112 --status consumed      # IGDB id
 cargo run -p catalogged-cli -- add --kind movie --source tmdb --external-id 4951  # title, year, cover fetched from TMDB
 cargo run -p catalogged-cli -- add --kind movie --title "Some Film" --status consumed --rating 8 --review "Loved it" --date 2026-11-20   # manual entry
 cargo run -p catalogged-cli -- edit --kind movie --slug some-film --rating 9 --review "Better on rewatch"          # only passed flags change
@@ -66,8 +68,8 @@ cargo run -p catalogged-cli -- import entries.csv --dry-run
 cargo run -p catalogged-cli -- import entries.csv                                 # --no-cover to skip covers, --skip-existing to re-run safely
 ```
 
-CSV columns: `kind,title,status,rating,review,year,source,external_id,consumed_at` (`notes` is accepted as an alias for `review`). `add` logs a `consumed` entry with no date as today; `import` leaves the date blank. Every column is optional except that a row needs a `title` or an `external_id`. An IMDb id (`tt...`) in `external_id` fills in kind, title and year from TMDB; for a numeric TMDB id set `kind`. `status` defaults to `consumed`. `--skip-existing` makes a re-run safe. See `docs/seed-example.csv`. Covers are downloaded from TMDB, converted to WebP (<= 300 KB), and uploaded to R2. A cover failure never loses the entry.
+CSV columns: `kind,title,status,rating,review,year,source,external_id,consumed_at` (`notes` is accepted as an alias for `review`). `add` logs a `consumed` entry with no date as today; `import` leaves the date blank. Every column is optional except that a row needs a `title` or an `external_id`. An IMDb id (`tt...`) in `external_id` fills in kind, title and year from TMDB; for any other provider id set `kind` (the source follows from it: movie/show = TMDB, book = Open Library work id, game = IGDB id). `status` defaults to `consumed`. `--skip-existing` makes a re-run safe. See `docs/seed-example.csv`. Covers are downloaded from the provider (TMDB, Open Library or IGDB), converted to WebP (<= 300 KB), and uploaded to R2. A cover failure never loses the entry.
 
 ## Admin UI
 
-`/admin` (behind Cloudflare Access): search TMDB, pick a result, choose a status (and optionally a date; consumed defaults to today), and Add. Every entry in the list below has an edit form (title, status, rating, year, date logged, review) and a Delete button; the list is paginated and filterable by title. The browser converts the poster to WebP with a canvas and uploads it. Games and books come from the CLI until their providers exist.
+`/admin` (behind Cloudflare Access): search (movies, shows, books, games), pick a result, choose a status (and optionally a date; consumed defaults to today), and Add. Every entry in the list below has an edit form (title, status, rating, year, date logged, review) and a Delete button; the list is paginated and filterable by title. The browser converts the poster to WebP with a canvas and uploads it. Game search in production needs the IGDB Worker secrets (see docs/plan.md item 5).

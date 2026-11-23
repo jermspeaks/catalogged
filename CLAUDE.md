@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Deployed at https://catalog.05152024.xyz (custom domain only; workers.dev is off). TMDB metadata and covers, edge caching, and a first admin UI exist. Open Library and IGDB providers, edit/delete, and richer public pages are still to do. See `docs/completed.md` for what exists, `docs/plan.md` for the remaining roadmap and decisions, and `README.md` for setup.
+Deployed at https://catalog.05152024.xyz (custom domain only; workers.dev is off). TMDB (movies/shows), Open Library (books) and IGDB (games) metadata and covers, edge caching, an admin UI with edit/delete, and a public grid with client-side search exist. Seed import, richer public pages and hardening are still to do. See `docs/completed.md` for what exists, `docs/plan.md` for the remaining roadmap and decisions, and `README.md` for setup.
 
 ## Commands
 
@@ -20,8 +20,8 @@ cd crates/worker && wrangler d1 migrations apply catalogged --local
 
 - `crates/core`: shared types (`Kind`, `Status`, `NewEntry`, ...). Keep it free of Worker/runtime deps. Enum string values (snake_case) must match the CHECK constraints in `migrations/`.
 - `crates/worker`: axum on workers-rs. D1 futures are not `Send`, so handlers use `#[worker::send]`. `wrangler.toml` lives here and points at `../../migrations`.
-- `crates/cli`: blocking reqwest client posting to `/admin/api/entries` with Cloudflare Access service-token headers. It never follows redirects (an Access login redirect must be an error, not success). It calls TMDB directly with `TMDB_API_KEY` and encodes covers to WebP before uploading.
-- TMDB: URL building and JSON parsing live in `crates/core/src/tmdb.rs`; the CLI and Worker each do their own HTTP. The Worker holds `TMDB_API_KEY` as a secret for the admin search proxy.
+- `crates/cli`: blocking reqwest client posting to `/admin/api/entries` with Cloudflare Access service-token headers. It never follows redirects (an Access login redirect must be an error, not success). It calls TMDB (`TMDB_API_KEY`), Open Library (no key) and IGDB (`IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET`) directly and encodes covers to WebP before uploading.
+- Providers: URL building and JSON parsing live in `crates/core/src/{tmdb,openlibrary,igdb}.rs`, all returning the shared `Candidate` (`cover_url`, `thumb_url`); the CLI and Worker each do their own HTTP. The Worker holds `TMDB_API_KEY` and `IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET` as secrets for the admin search proxy. Source per kind: movie/show = tmdb, book = open_library (work id), game = igdb.
 - `/index.json` (compact entries, built in SQLite) feeds client-side search/filter/sort on `/`; the script and palette/dark-mode CSS live in `crates/worker/src/public_ui.rs`.
 - Public GETs (not `/admin`) are cached with the Cache API in the `fetch` entrypoint; a response is cached only if it sets `Cache-Control`. Public changes can lag up to 5 minutes.
 - The admin UI and CLI share one write endpoint so validation lives in the Worker.

@@ -2,7 +2,7 @@
 //! Worker (`worker::Fetch`) each do the I/O so this crate stays runtime-free.
 
 use crate::Kind;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 const API: &str = "https://api.themoviedb.org/3";
 const IMAGE: &str = "https://image.tmdb.org/t/p";
@@ -61,6 +61,10 @@ pub fn poster_url(poster_path: &str) -> String {
     format!("{IMAGE}/{POSTER_SIZE}{poster_path}")
 }
 
+fn thumb_url(poster_path: &str) -> String {
+    format!("{IMAGE}/w92{poster_path}")
+}
+
 /// TMDB accepts a v4 read-access token (JWT, `Authorization: Bearer`) or a v3 key (`api_key=`).
 /// Returns the final URL and the Authorization header value, if any.
 pub fn authenticate(url: String, key: &str) -> (String, Option<String>) {
@@ -72,15 +76,7 @@ pub fn authenticate(url: String, key: &str) -> (String, Option<String>) {
     }
 }
 
-/// A search hit or fetched item, normalized across movies and shows.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Candidate {
-    pub id: String,
-    pub title: String,
-    pub year: Option<i32>,
-    pub poster_path: Option<String>,
-    pub overview: Option<String>,
-}
+pub use crate::Candidate;
 
 #[derive(Deserialize)]
 struct Raw {
@@ -105,7 +101,8 @@ impl From<Raw> for Candidate {
             id: r.id.to_string(),
             title: r.title.or(r.name).unwrap_or_default(),
             year: date.get(..4).and_then(|y| y.parse().ok()),
-            poster_path: r.poster_path.filter(|p| !p.is_empty()),
+            cover_url: r.poster_path.as_deref().filter(|p| !p.is_empty()).map(poster_url),
+            thumb_url: r.poster_path.as_deref().filter(|p| !p.is_empty()).map(thumb_url),
             overview: r.overview.filter(|o| !o.is_empty()),
         }
     }
@@ -127,8 +124,9 @@ mod tests {
     fn parses_movie_and_show() {
         let m = parse_details(r#"{"id":4951,"title":"10 Things I Hate About You","release_date":"1999-03-31","poster_path":"/a.jpg","overview":""}"#).unwrap();
         assert_eq!((m.id.as_str(), m.year, m.overview), ("4951", Some(1999), None));
+        assert_eq!(m.cover_url.as_deref(), Some("https://image.tmdb.org/t/p/w500/a.jpg"));
         let s = parse_search(r#"{"results":[{"id":1,"name":"Show","first_air_date":"","poster_path":null}]}"#).unwrap();
-        assert_eq!((s[0].title.as_str(), s[0].year, s[0].poster_path.clone()), ("Show", None, None));
+        assert_eq!((s[0].title.as_str(), s[0].year, s[0].cover_url.clone()), ("Show", None, None));
     }
 
     #[test]
