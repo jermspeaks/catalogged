@@ -22,6 +22,7 @@ cd crates/worker && wrangler d1 migrations apply catalogged --local
 - `crates/worker`: axum on workers-rs. D1 futures are not `Send`, so handlers use `#[worker::send]`. `wrangler.toml` lives here and points at `../../migrations`.
 - `crates/cli`: blocking reqwest client posting to `/admin/api/entries` with Cloudflare Access service-token headers. It never follows redirects (an Access login redirect must be an error, not success). It calls TMDB directly with `TMDB_API_KEY` and encodes covers to WebP before uploading.
 - TMDB: URL building and JSON parsing live in `crates/core/src/tmdb.rs`; the CLI and Worker each do their own HTTP. The Worker holds `TMDB_API_KEY` as a secret for the admin search proxy.
+- `/index.json` (compact entries, built in SQLite) feeds client-side search/filter/sort on `/`; the script and palette/dark-mode CSS live in `crates/worker/src/public_ui.rs`.
 - Public GETs (not `/admin`) are cached with the Cache API in the `fetch` entrypoint; a response is cached only if it sets `Cache-Control`. Public changes can lag up to 5 minutes.
 - The admin UI and CLI share one write endpoint so validation lives in the Worker.
 
