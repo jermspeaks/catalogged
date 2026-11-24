@@ -16,6 +16,7 @@ from collections import Counter
 
 MONTHS = {m: i + 1 for i, m in enumerate("January February March April May June July August September October November December".split())}
 KIND = {"🎥": "movie", "📕": "book", "🎮": "game", "📺": "show"}
+MONTHS["Febrary"] = 2  # a typo in the 2019 log
 COLS = "kind,title,status,rating,review,year,source,external_id,consumed_at,creator".split(",")
 
 
@@ -33,7 +34,8 @@ def parse(src: str, year: str) -> list[dict]:
         day, emoji, _rewatch, rest = m.groups()
         kind = KIND[emoji]
         tmdb = re.search(r"themoviedb\.org/(movie|tv)/(\d+)", rest)
-        # Drop markdown links and bare [Letterboxd](url) style suffixes.
+        # Drop markdown links (also wrapped in parentheses, as in `([Letterboxd](url))`) and bare [Letterboxd](url) style suffixes.
+        rest = re.sub(r"\s*\(\s*\[[^\]]*\]\([^)]*\)\s*\)", "", rest)
         rest = re.sub(r"\s*\[[^\]]*\]\([^)]*\)", "", rest)
         rest = re.sub(r"\s*\[[^\]]*\]\S*", "", rest)
         rest = re.sub(r"\s*\((MOVIE|SHOW|TV|BOOK|GAME)\)\s*$", "", rest).strip()
@@ -41,6 +43,7 @@ def parse(src: str, year: str) -> list[dict]:
         creator = ""
         if kind == "book" and " by " in rest:
             rest, creator = rest.rsplit(" by ", 1)
+        rest = re.sub(r'^"(.*)"(?=\s*(\(\d{4}(-\d{4})?\))?\s*$)', r"\1", rest.strip())  # "Now, Voyager" (1942)
         y = ""
         ym = re.search(r"\s*\((\d{4})(?:-\d{4})?\)\s*$", rest)
         if ym:
