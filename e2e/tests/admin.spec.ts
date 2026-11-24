@@ -274,3 +274,48 @@ test('admin list can show only entries missing an id or a cover', async ({ page,
   await page.goto('/admin?missing=bogus');
   await expect(page.locator('select[name=missing]')).toHaveValue('');
 });
+
+test('edit page: Identify takes a provider id and fetches that record (lookup mocked)', async ({ page, request }) => {
+  const slug = await seed(request, { kind: 'movie', title: 'E2E Id Identify' });
+  const looked: string[] = [];
+  let searches = 0;
+  await page.route('**/admin/api/lookup*', (r) => {
+    const id = new URL(r.request().url()).searchParams.get('id') ?? '';
+    looked.push(id);
+    if (id === 'tt0903747') return r.fulfill({ json: { kind: 'show', id: '1396', title: 'A Show', year: 2008, cover_url: null, thumb_url: null, overview: null, creator: 'Someone' } });
+    if (id === '7770603') return r.fulfill({ json: { kind: 'movie', id: '7770603', title: 'The Matrix', year: 1999, cover_url: null, thumb_url: null, overview: null, creator: 'The Wachowskis' } });
+    return r.fulfill({ status: 502, body: 'nope' });
+  });
+  await page.route('**/admin/api/search*', (r) => { searches++; return r.fulfill({ json: [{ id: '9', title: '7770603 Film', year: 2020, cover_url: null, thumb_url: null, overview: null }] }); });
+  await page.goto(`/admin/edit/movie/${slug}`);
+  await page.locator('summary', { hasText: 'Identify' }).click();
+
+  // a title searches only
+  await page.fill('#coverq', 'some title');
+  await page.locator('#coversearch').getByRole('button', { name: 'Search' }).click();
+  await expect(page.locator('#coverresults li')).toHaveCount(1);
+  expect(looked).toEqual([]);
+
+  // an IMDb id that names a show cannot be applied to a movie entry
+  await page.fill('#coverq', 'tt0903747');
+  await page.locator('#coversearch').getByRole('button', { name: 'Search' }).click();
+  await expect(page.locator('#coverresults li')).toHaveCount(1);
+  await expect(page.locator('#coverresults li')).toContainText('that is a show');
+  await expect(page.locator('#coverresults li button')).toBeDisabled();
+
+  // a bare number looks the record up by id and also searches (it could be a title), the id record first
+  await page.fill('#coverq', '7770603');
+  await page.locator('#coversearch').getByRole('button', { name: 'Search' }).click();
+  await expect(page.locator('#coverresults li')).toHaveCount(2);
+  await expect(page.locator('#coverresults li').first()).toContainText('[id 7770603] The Matrix');
+  expect(searches).toBe(2);
+  await page.locator('#coverresults li').first().getByRole('button', { name: 'Use this record' }).click();
+  await expect(page.locator('#msg')).toContainText('Identified as "The Matrix"');
+  expect((await entry(request, 'movie', slug)).body).toMatchObject({ title: 'The Matrix', source: 'tmdb', external_id: '7770603', year: 1999, creator: 'The Wachowskis' });
+
+  // a failed lookup of a non-numeric id is reported, not turned into a title search
+  await page.fill('#coverq', 'tt9999999');
+  await page.locator('#coversearch').getByRole('button', { name: 'Search' }).click();
+  await expect(page.locator('#msg')).toContainText('Lookup failed');
+  expect(searches).toBe(2);
+});

@@ -182,19 +182,34 @@ $('#coverlink').addEventListener('submit', (ev) => { ev.preventDefault(); busy(e
 
 // Identify: search the provider, pick the record, and it replaces the title, year, creator, provider id and cover.
 $('#coversearch').addEventListener('submit', (ev) => { ev.preventDefault(); busy(ev.target, coverSearch); });
+// A provider id (TMDB or IGDB number, IMDb tt id, Open Library OL…W) fetches that record directly. A bare number
+// could also be a title ("1917"), so it searches as well and lists the record by id first.
+const ID_LIKE = /^(tt\d+|\d+|OL\d+W)$/i;
 async function coverSearch() {
-  const q = $('#coverq').value.trim(); if (!q) return;
-  msg('Searching…');
-  const r = await fetch(`/admin/api/search?kind=${kind}&q=${encodeURIComponent(q)}`);
-  if (!r.ok) { msg(`Search failed: ${r.status} ${(await r.text()).slice(0, 120)}`); return; }
-  const items = await r.json();
+  let q = $('#coverq').value.trim(); if (!q) return;
+  const idLike = ID_LIKE.test(q), numeric = /^\d+$/.test(q);
+  if (/^ol/i.test(q)) q = q.toUpperCase();
+  const items = [];
+  msg(idLike ? 'Looking up…' : 'Searching…');
+  if (idLike) {
+    const r = await fetch(`/admin/api/lookup?kind=${kind}&id=${encodeURIComponent(q)}`);
+    if (r.ok) items.push({ ...(await r.json()), byId: true });
+    else if (!numeric) { msg(`Lookup failed: ${r.status} ${(await r.text()).slice(0, 120)}`); return; }
+  }
+  if (!idLike || numeric) {
+    const r = await fetch(`/admin/api/search?kind=${kind}&q=${encodeURIComponent(q)}`);
+    if (!r.ok) { msg(`Search failed: ${r.status} ${(await r.text()).slice(0, 120)}`); return; }
+    items.push(...(await r.json()));
+  }
   msg(items.length ? '' : 'No results.');
   const ul = $('#coverresults'); ul.replaceChildren();
   for (const c of items) {
     const li = document.createElement('li');
     if (c.thumb_url) { const im = document.createElement('img'); im.src = c.thumb_url; im.width = 46; im.alt = ''; li.append(im); }
-    const label = document.createElement('span'); label.textContent = ` ${c.title}${c.year ? ` (${c.year})` : ''}${c.creator ? ` · ${c.creator}` : ''} `;
+    const label = document.createElement('span'); label.textContent = ` ${c.byId ? `[id ${c.id}] ` : ''}${c.title}${c.year ? ` (${c.year})` : ''}${c.creator ? ` · ${c.creator}` : ''} `;
     const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = 'Use this record';
+    // An IMDb id can name a show while this entry is a movie (or the reverse): the kind of an entry never changes.
+    if (c.kind && c.kind !== kind) { btn.disabled = true; label.textContent += `(that is a ${c.kind}, this entry is a ${kind})`; }
     btn.onclick = () => busy(li, () => identify(c));
     li.append(label, btn); ul.append(li);
   }
@@ -369,9 +384,9 @@ pub fn edit_page(e: &Entry, cover_url: Option<String>) -> Markup {
             @if let Some(u) = &cover_url { img #coverimg.cover src=(u) alt=""; } @else { div #coverph.cover.ph {} }
             label { "Upload or replace cover " input #coverfile type="file" accept="image/*"; }
             details {
-                summary { "Identify (search " (e.kind.as_str()) " sources: replaces title, year, " (creator_label(e.kind).to_lowercase()) ", id and cover)" }
+                summary { "Identify (search " (provider_name(e.kind)) " by title or id; replaces title, year, " (creator_label(e.kind).to_lowercase()) ", id and cover)" }
                 form #coversearch.row {
-                    input #coverq type="search" value=(e.title) required;
+                    input #coverq type="search" value=(e.title) required aria-label="Title or provider id";
                     button type="submit" { "Search" }
                 }
                 ul #coverresults.plain {}

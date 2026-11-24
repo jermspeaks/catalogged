@@ -82,7 +82,7 @@ _Last reviewed: 2026-11-23, after PR #16._
 - Admin list filter: `/admin?missing=id|cover|any` (a dropdown beside the title filter) lists entries without a provider id and/or a cover; each row also shows "no id" and "no cover".
 
 ### Identify (edit page)
-- The edit page's cover finder is now **Identify**: search the provider (prefilled with the title), pick a record, and its title, year, creator, provider id and cover replace the current ones and the entry is saved in one step (rating, review, status and date are kept; the slug never changes). A record without a cover keeps the current cover. This replaces "Find a cover"; The CLI has the same thing as `catalogged identify` (see README).
+- The edit page's cover finder is now **Identify**: search the provider (prefilled with the title), pick a record, and its title, year, creator, provider id and cover replace the current ones and the entry is saved in one step (rating, review, status and date are kept; the slug never changes). A record without a cover keeps the current cover. The box also takes a provider id (TMDB or IGDB number, IMDb `tt…`, Open Library `OL…W`): it fetches that record through `/admin/api/lookup` (a bare number also searches, since it could be a title; a record of the wrong kind is shown but cannot be applied). This replaces "Find a cover"; The CLI has the same thing as `catalogged identify` (see README).
 
 ### Default sort is date logged
 - The public grid, the server-rendered first page and `/index.json` now default to date logged, newest first, undated entries last, ties by last update. "Recently updated" is still a sort option; the admin list stays by last update. Migration `0004` adds indexes on `(consumed_at DESC, updated_at DESC)` (and by kind) so a page reads about 60 rows.
