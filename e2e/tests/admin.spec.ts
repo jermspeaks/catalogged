@@ -32,7 +32,7 @@ test('manual add with a cover, then it shows in the list and on the public grid'
 
   await page.goto('/admin?q=e2e manual');
   await expect(page.getByRole('link', { name: 'E2E Manual Book' })).toBeVisible();
-  await page.goto('/?q=e2e%20manual');
+  await page.goto('/wanted?q=e2e%20manual'); // the admin form's default status is wanted
   await expect(page.locator('#grid li img')).toHaveCount(1);
   expect(await page.locator('#grid li img').evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(true);
 });

@@ -25,7 +25,7 @@ What is built lives in [completed.md](completed.md). This file is what remains, 
 - Covers are served from the public bucket domain, not the Worker. No collections. `add` and `import` fetch metadata themselves.
 - Statuses are `wanted | in_progress | consumed`; `consumed_at` is the date logged; slugs never change on edit.
 - Seeding is an import, not a special mechanism: sheets go through `match` (find ids), a human review, then `import`. Re-watches and re-plays are not tracked: one entry per work.
-- Public site: a simple grid with search, filter and sort. No attempt to copy erika.florist's design.
+- Public site: three lists (consumed on `/`, `/in-progress`, `/wanted`) in a top navigation, each a simple grid with search, kind filter and sort. No attempt to copy erika.florist's design.
 - Deploys are separate from merges and happen only when asked.
 
 ## Priorities

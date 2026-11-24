@@ -19,7 +19,7 @@ test('grid loads, controls appear, search narrows results', async ({ page }) => 
   await page.goto('/');
   await expect(page.locator('#controls')).toBeVisible();
   await page.fill('input[name=q]', 'zzpub');
-  await expect(page.locator('#count')).toHaveText('4 entries');
+  await expect(page.locator('#count')).toHaveText('2 entries'); // Alpha and Delta; the wanted and in-progress ones are on their own pages
   await page.fill('input[name=q]', 'ZZPUB alp'); // case-insensitive
   await expect(page.locator('#count')).toHaveText('1 entry');
   expect(await titles(page)).toEqual(['Zzpub Alpha (2001)']);
@@ -35,32 +35,66 @@ test('titles are rendered as text, not HTML', async ({ page }) => {
   await expect(page.locator('#grid b')).toHaveCount(0);
 });
 
-test('kind and status filters, with state kept in the URL', async ({ page }) => {
+test('kind filter, with state kept in the URL; consumed, in progress and wanted are separate pages', async ({ page }) => {
   await page.goto('/');
   await page.fill('input[name=q]', 'zzpub');
-  await page.selectOption('select[name=kind]', 'book');
+  await expect(page.locator('select[name=status]')).toHaveCount(0); // status is the top navigation, not a filter
+  await page.selectOption('select[name=kind]', 'show');
   await expect(page.locator('#count')).toHaveText('1 entry');
-  await page.selectOption('select[name=kind]', '');
-  await page.selectOption('select[name=status]', 'consumed');
-  await expect(page.locator('#count')).toHaveText('2 entries');
   await expect(page).toHaveURL(/q=zzpub/);
-  await expect(page).toHaveURL(/status=consumed/);
-  // reload restores the same view
-  await page.reload();
+  await expect(page).toHaveURL(/kind=show/);
+  await page.reload(); // reload restores the same view
   await expect(page.locator('input[name=q]')).toHaveValue('zzpub');
-  await expect(page.locator('#count')).toHaveText('2 entries');
+  await expect(page.locator('#count')).toHaveText('1 entry');
+
+  const tabs = page.locator('nav.tabs');
+  await expect(tabs.getByRole('link')).toHaveText(['Consumed', 'In progress', 'Wanted']);
+  await expect(tabs.locator('[aria-current=page]')).toHaveText('Consumed');
+  await tabs.getByRole('link', { name: 'Wanted' }).click();
+  await expect(page).toHaveURL(/\/wanted$/);
+  await expect(tabs.locator('[aria-current=page]')).toHaveText('Wanted');
+  await page.fill('input[name=q]', 'zzpub');
+  await expect(page.locator('#count')).toHaveText('1 entry');
+  expect((await titles(page)).map((t) => t.split(' ')[1])).toEqual(['Beta']);
+  await tabs.getByRole('link', { name: 'In progress' }).click();
+  await expect(page).toHaveURL(/\/in-progress$/);
+  await page.fill('input[name=q]', 'zzpub');
+  await expect(page.locator('#count')).toHaveText('1 entry');
+  expect((await titles(page)).map((t) => t.split(' ')[1])).toEqual(['Gamma']);
+  await expect(page.locator('#grid li small')).toHaveText('game · 😄'); // the tab says the status, so cards do not
 });
 
-test('sorting', async ({ page }) => {
-  await page.goto('/?q=zzpub&sort=title');
-  await expect(page.locator('#count')).toHaveText('4 entries');
-  expect((await titles(page)).map((t) => t.split(' ')[1])).toEqual(['Alpha', 'Beta', 'Delta', 'Gamma']);
+test('no-JS pages list only their own status', async ({ browser }) => {
+  const ctx = await browser.newContext({ javaScriptEnabled: false });
+  const p = await ctx.newPage();
+  const html = async (path: string) => (await p.goto(path), await p.content());
+  const wanted = await html('/wanted');
+  expect(wanted).toContain('Zzpub Beta');
+  expect(wanted).not.toContain('Zzpub Alpha');
+  expect(wanted).not.toContain('Zzpub Gamma');
+  const progress = await html('/in-progress');
+  expect(progress).toContain('Zzpub Gamma');
+  expect(progress).not.toContain('Zzpub Beta');
+  const home = await html('/');
+  expect(home).toContain('Zzpub Alpha');
+  expect(home).not.toContain('Zzpub Beta');
+  await ctx.close();
+});
+
+test('sorting', async ({ page, request }) => {
+  await seed(request, { kind: 'movie', title: 'Zzsort Alpha', rating: 9, year: 2001, consumed_at: '2020-01-01' });
+  await seed(request, { kind: 'movie', title: 'Zzsort Beta', rating: 3, year: 2010, consumed_at: '2023-01-01' });
+  await seed(request, { kind: 'movie', title: 'Zzsort Gamma', year: 1999, consumed_at: '2021-01-01' });
+  const names = async () => (await titles(page)).map((t) => t.split(' ')[1]);
+  await page.goto('/?q=zzsort&sort=title');
+  await expect(page.locator('#count')).toHaveText('3 entries');
+  expect(await names()).toEqual(['Alpha', 'Beta', 'Gamma']);
   await page.selectOption('select[name=sort]', 'rating');
-  expect((await titles(page)).map((t) => t.split(' ')[1])).toEqual(['Alpha', 'Gamma', 'Delta', 'Beta']);
+  expect(await names()).toEqual(['Alpha', 'Beta', 'Gamma']);
   await page.selectOption('select[name=sort]', 'year');
-  expect((await titles(page)).map((t) => t.split(' ')[1])).toEqual(['Gamma', 'Delta', 'Alpha', 'Beta']);
+  expect(await names()).toEqual(['Beta', 'Alpha', 'Gamma']);
   await page.selectOption('select[name=sort]', 'logged');
-  expect((await titles(page))[0]).toContain('Delta'); // 2025 logged first
+  expect(await names()).toEqual(['Beta', 'Gamma', 'Alpha']); // newest logged first
 });
 
 test('detail page shows the review and an Edit link', async ({ page }) => {
@@ -137,13 +171,11 @@ test('default order is date logged, newest first, undated last (grid and no-JS l
   await ctx.close();
 });
 
-test('cards and detail pages: no "consumed" label, ratings as faces, month and year logged (grid, no-JS list, detail)', async ({ page, browser }) => {
+test('cards and detail pages: faces for ratings, month and year logged, no status label on cards', async ({ page, browser }) => {
   const small = (p: import('@playwright/test').Page, t: string) => p.locator('#grid li', { hasText: t }).locator('small');
   await page.goto('/?q=zzpub');
-  await expect(small(page, 'Zzpub Alpha')).toHaveText('movie · 😍 · Mar 2024'); // consumed is assumed, 9/10, logged 2024-03-01
+  await expect(small(page, 'Zzpub Alpha')).toHaveText('movie · 😍 · Mar 2024'); // 9/10 logged 2024-03-01; "consumed" is assumed
   await expect(small(page, 'Zzpub Alpha').locator('[title="9/10"]')).toHaveCount(1);
-  await expect(small(page, 'Zzpub Gamma')).toHaveText('game · in progress · 🙂'); // 7/10, no date
-  await expect(small(page, 'Zzpub Beta')).toHaveText('book · wanted');
   await expect(page.locator('#grid')).not.toContainText('/10');
   await expect(page.locator('#grid')).not.toContainText('consumed');
 
@@ -151,10 +183,26 @@ test('cards and detail pages: no "consumed" label, ratings as faces, month and y
   const p = await ctx.newPage();
   await p.goto('/');
   await expect(small(p, 'Zzpub Alpha')).toHaveText('movie · 😍 · Mar 2024');
-  await expect(small(p, 'Zzpub Gamma')).toHaveText('game · in progress · 🙂');
+  await p.goto('/wanted');
+  await expect(small(p, 'Zzpub Beta')).toHaveText('book');
   await ctx.close();
 
   await page.goto('/?q=zzpub alpha');
   await page.locator('#grid li a').first().click();
   await expect(page.locator('p', { hasText: 'movie' }).first()).toHaveText('movie · 😍 · Mar 2024');
+  await page.goto('/entry/game/zzpub-gamma'); // detail pages do name a status other than consumed
+  await expect(page.locator('p', { hasText: 'game' }).first()).toHaveText('game · in progress · 😄');
+  await expect(page.getByRole('link', { name: '← all' })).toHaveAttribute('href', '/in-progress');
+});
+
+test('every rating from 1 to 10 has its face', async ({ request }) => {
+  const want = ['😖😖', '😖', '🙁🙁', '🙁', '😐', '🙂', '😄', '😄😄', '😍', '🤩'];
+  for (let r = 1; r <= 10; r++) await seed(request, { kind: 'book', title: `Zzrate ${r}`, rating: r });
+  const html = await (await request.get('/entry/book/zzrate-7')).text();
+  expect(html).toContain('😄');
+  for (let r = 1; r <= 10; r++) {
+    const page = await (await request.get(`/entry/book/zzrate-${r}`)).text();
+    expect(page, `rating ${r}`).toContain(`title="${r}/10"`);
+    expect(page).toContain(`>${want[r - 1]}<`);
+  }
 });
