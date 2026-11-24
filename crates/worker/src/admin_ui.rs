@@ -245,7 +245,17 @@ fn shell(title: &str, body: Markup, js: &str) -> Markup {
     }
 }
 
-pub fn page(entries: &[Entry], page: u32, more: bool, q: &str) -> Markup {
+pub fn page(entries: &[Entry], page: u32, more: bool, q: &str, missing: &str) -> Markup {
+    let qs = |page: u32| {
+        let mut s = format!("/admin?page={page}");
+        if !q.is_empty() {
+            s.push_str(&format!("&q={}", urlencoding_min(q)));
+        }
+        if !missing.is_empty() {
+            s.push_str(&format!("&missing={missing}"));
+        }
+        s
+    };
     let kinds = || html! {
         option value="movie" { "Movie" } option value="show" { "TV show" } option value="book" { "Book" } option value="game" { "Game" }
     };
@@ -291,6 +301,12 @@ pub fn page(entries: &[Entry], page: u32, more: bool, q: &str) -> Markup {
         h2 { "Catalogue" }
         form.row method="get" action="/admin" {
             input type="search" name="q" value=(q) placeholder="Filter by title…";
+            select name="missing" aria-label="Show only entries missing" {
+                option value="" selected[missing.is_empty()] { "all entries" }
+                option value="any" selected[missing == "any"] { "missing an id or a cover" }
+                option value="id" selected[missing == "id"] { "missing a provider id" }
+                option value="cover" selected[missing == "cover"] { "missing a cover" }
+            }
             button type="submit" { "Filter" }
         }
         ul.plain {
@@ -298,14 +314,15 @@ pub fn page(entries: &[Entry], page: u32, more: bool, q: &str) -> Markup {
                 li {
                     a href={"/admin/edit/" (e.kind.as_str()) "/" (e.slug)} { (e.title) }
                     " · " (e.kind.as_str()) " · " (e.status.as_str())
-                    @if e.cover_key.is_none() { " · no cover" }
+                    @if e.external_id.as_deref().unwrap_or("").is_empty() { " · no id" }
+                    @if e.cover_key.as_deref().unwrap_or("").is_empty() { " · no cover" }
                 }
             }
         }
         p {
-            @if page > 1 { a href={"/admin?page=" (page - 1) @if !q.is_empty() { "&q=" (q) }} { "← newer" } }
+            @if page > 1 { a href=(qs(page - 1)) { "← newer" } }
             @if page > 1 && more { " · " }
-            @if more { a href={"/admin?page=" (page + 1) @if !q.is_empty() { "&q=" (q) }} { "older →" } }
+            @if more { a href=(qs(page + 1)) { "older →" } }
         }
     }, ADMIN_JS)
 }
@@ -387,4 +404,11 @@ pub fn edit_page(e: &Entry, cover_url: Option<String>) -> Markup {
             }
         }
     }, EDIT_JS)
+}
+
+/// Percent-encodes everything but unreserved characters (enough for a title filter in a query string).
+fn urlencoding_min(s: &str) -> String {
+    s.bytes()
+        .map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
+        .collect()
 }

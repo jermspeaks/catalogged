@@ -1,6 +1,6 @@
 # Plan
 
-What is built lives in [completed.md](completed.md). This file is what remains, in priority order, plus the decisions that shape it. The free-tier rules in [free-tier.md](free-tier.md) apply to every item. Last reviewed: 2026-11-23, after the creator field and matching work.
+What is built lives in [completed.md](completed.md). This file is what remains, in priority order, plus the decisions that shape it. The free-tier rules in [free-tier.md](free-tier.md) apply to every item. Last reviewed: 2026-11-23, after the 2010 to 2016 imports.
 
 ## Goals
 
@@ -32,11 +32,12 @@ What is built lives in [completed.md](completed.md). This file is what remains, 
 
 Ordered by value for the owner's actual goal (a complete, good-looking catalogue) against effort. Sizes: S under half a day, M about a day, L more. Reorder freely.
 
-### P1. Import the rest of the log (M)
-The 2010 sheet is in; 2011 to 2026 are not. The owner's log lives in `~/projects/jermspeaks.github.io/src/content/log/` (one markdown file per year, with books, movies, some games and shows; later years carry TMDB links and Letterboxd links).
-- Generator: `scripts/log2csv.py <log.md> <year> <out.csv>` (in the repo; sheets go to `seeds/`, which is gitignored because they are personal data). It reads the 2010 and 2011 formats and understands TMDB links, Letterboxd links, `🔁`, `🎮` and `📺` lines; later years (2013 onwards) have not been run through it yet, so check each year's output before matching. Books get a `creator` column from the `by Author` text.
-- Per year: generate, `match --interactive` (sure matches are filled in without asking), `import --dry-run`, 10 rows for real, then the rest with `--skip-existing`; `scripts/backup.sh` first. Mind the D1 write budget: 5,000 entries is about half of one day's writes; import a year or two per run.
-- Status: creator migration applied and Worker deployed (2026-11-23); creators backfilled for the 2010 entries (76 of 79 have one). 2010 imported. 2011 imported (2026-11-23): 124 rows, 123 added and 1 already present; 9 have no cover or provider id (7 books and 2 movies, mostly typos and foreign titles) and need fixing by hand on the edit page. The catalogue now has 202 entries. Next: 2012 and on, one year at a time.
+### P1. Import the rest of the log (M, backlog)
+2010 to 2016 are in (755 entries). 2017 to 2026 are not: **backlog**, to resume after the items below. The owner's log lives in `~/projects/jermspeaks.github.io/src/content/log/` (2010 to 2012 are named `2011-01-01-2010.md`, `2012-01-01-2011.md`, `2013-01-01-2012.md`; from 2013 the file is named for its own year, e.g. `2016.md`, `2025-01-10-2025.md`, `2026-01-11-2026.md`).
+- Generator: `scripts/log2csv.py <log.md> <year> <out.csv>` (sheets go to `seeds/`, gitignored because they are personal data). It reads the 2010 to 2016 formats (month headings with or without the year) and understands TMDB links, Letterboxd links, `🔁`, `🎮` and `📺` lines; 2017 onwards has not been run through it yet, so check each year's output (row count against the list lines, format surprises) before matching. Books get a `creator` from `by Author`.
+- Per year: generate, `match --interactive` (sure matches are filled in without asking), `import --dry-run`, `scripts/backup.sh`, 10 rows for real and a check in D1, then the rest with `--skip-existing`. Mind the D1 write budget: 5,000 entries is about half of one day's writes; a year or two per run is fine.
+- Check the 10-row trial for hand-picked mismatches: a wrong pick during `match -i` (for example a 2015 short instead of the 2014 *Birdman*) imports quietly. The CSV `creator` column is copied onto the entry, so correct it in the sheet too.
+- Known loose ends from 2010 to 2016 (edit page): entries with no provider id or cover (use the new "missing" filter in `/admin`), four books saved with Open Library edition ids (`OL…M`, which no lookup accepts), nine entries with an id but no year, and six with no creator. Covers whose posters are WebP failed to decode in the CLI (see P8).
 
 ### P2. Identify (M)
 New idea from the owner (2026-11-23): replace the cover finder with an **identify** action that grabs all metadata from the provider and the cover, including the title.
@@ -47,19 +48,26 @@ New idea from the owner (2026-11-23): replace the cover finder with an **identif
 ### P3. Default public sort is date logged (S)
 New idea from the owner (2026-11-23). The grid defaults to "recent" (last updated). Make "date logged" the default: the sort control, the order of `/index.json` (it is `updated_at DESC` today), and the server-rendered first page. Entries without a date sort last.
 
-### P4. Measure at scale (S, after a big import)
+### P4. Public card and detail polish (S)
+From the owner's discovery notes (2026-11-23). The status enum is `wanted | in_progress | consumed` (CHECK constraint in `migrations/0001`).
+- Stop printing "consumed" on cards and detail pages (it is assumed); only `wanted` and `in progress` need a label. Other states may get their own pages later.
+- Show the date logged (`consumed_at`) on cards and the detail page.
+- Show ratings as emojis (a few steps, like the reference site) instead of `n/10`. Needs the scale chosen with the owner; the stored rating stays 1 to 10.
+
+### P5. Measure at scale (S, after a big import)
 Nothing has been measured above 79 entries. Before approaching 5,000: size and CPU time of `/index.json` (it now carries the creator too), D1 rows read per day, R2 operations (see the monitoring checklist in [operations.md](operations.md)). If `/index.json` is too heavy, options are trimming fields, paging it, or FTS5 on D1 (unverified).
 
-### P5. Warn before adding a duplicate (S)
+### P6. Warn before adding a duplicate (S)
 The database already rejects duplicates (409). In the admin search results, mark titles already in the catalogue ("in catalogue", linking to its edit page) and disable Add, instead of failing after the click. Needs the existing list (`/index.json`) loaded on the admin page.
 
-### P6. Public site (M, as wanted)
+### P7. Public site (M, as wanted)
 Per-kind and per-status counts; richer detail pages (year, source link, provider overview); lazy cover sizing; show the creator on grid cards. Optional until the catalogue is populated, since the grid is the main surface.
 
-### P7. Housekeeping (S each)
+### P8. Housekeeping (S each)
 - GitHub Action running the e2e suite on pull requests (none exists; run `npm test` in `e2e/` before merging Worker or UI changes today).
 - PNG and apple-touch icons (the favicon and manifest use an SVG only).
-- Validate provider ids on write: an Open Library id must look like `OL…W` (a work). One entry was saved with an edition id (`OL22376472M`, "Naked"), which no lookup accepts; its work is `OL2693083W`. Fix that entry by hand on its edit page.
+- Validate provider ids on write: an Open Library id must look like `OL…W` (a work). Edition ids (`OL…M`) were saved by hand for four books and no lookup accepts them; fix those entries on their edit pages, and reject the pattern in `EditEntry::validate_for`.
+- The CLI cannot decode WebP posters (TMDB serves a few): the entry is added with its id but no cover (*8½*, *Alps*, *Head*, *I Knew Her Well*, *The Man From U.N.C.L.E.*). Decode WebP, or ask TMDB for a JPEG size.
 - Admin game search in production needs the two IGDB Worker secrets (`wrangler secret put IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET`); owner action, only if game search in `/admin` is wanted.
 - Review real free-tier numbers after a few weeks of traffic.
 

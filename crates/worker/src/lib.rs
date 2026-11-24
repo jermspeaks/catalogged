@@ -196,27 +196,67 @@ const MAX_PAGE: u32 = 200;
 
 /// One page of entries, newest first. Fetches one extra row to know whether a next page exists
 /// (no COUNT(*): D1 bills rows scanned). `q` filters by title (admin only; scans the table).
+/// Admin list filter: entries lacking a provider id and/or a cover.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Missing {
+    Id,
+    Cover,
+    Either,
+}
+
+impl Missing {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "id" => Some(Self::Id),
+            "cover" => Some(Self::Cover),
+            "any" => Some(Self::Either),
+            _ => None,
+        }
+    }
+
+    fn sql(self) -> &'static str {
+        const NO_ID: &str = "(external_id IS NULL OR external_id = '')";
+        const NO_COVER: &str = "(cover_key IS NULL OR cover_key = '')";
+        match self {
+            Self::Id => NO_ID,
+            Self::Cover => NO_COVER,
+            Self::Either => "((external_id IS NULL OR external_id = '') OR (cover_key IS NULL OR cover_key = ''))",
+        }
+    }
+}
+
 async fn load_entries(
     env: &Env,
     kind: Option<Kind>,
     q: Option<&str>,
+    missing: Option<Missing>,
     page: u32,
 ) -> Result<(Vec<Entry>, bool)> {
     let db = env.d1("DB")?;
     let offset = f64::from(page.saturating_sub(1).min(MAX_PAGE) * PAGE_SIZE);
     let limit = f64::from(PAGE_SIZE + 1);
     let like = q.filter(|q| !q.is_empty()).map(|q| format!("%{}%", q.replace(['%', '_'], "")));
-    let stmt = match (kind, &like) {
-        (Some(k), None) => db
-            .prepare(format!("SELECT {COLS} FROM entries WHERE kind = ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3"))
-            .bind(&[k.as_str().into(), limit.into(), offset.into()])?,
-        (None, None) => db
-            .prepare(format!("SELECT {COLS} FROM entries ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2"))
-            .bind(&[limit.into(), offset.into()])?,
-        (_, Some(l)) => db
-            .prepare(format!("SELECT {COLS} FROM entries WHERE title LIKE ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3"))
-            .bind(&[l.clone().into(), limit.into(), offset.into()])?,
-    };
+    let mut conds: Vec<String> = Vec::new();
+    let mut params: Vec<JsValue> = Vec::new();
+    if let Some(k) = kind {
+        params.push(k.as_str().into());
+        conds.push(format!("kind = ?{}", params.len()));
+    }
+    if let Some(l) = like {
+        params.push(l.into());
+        conds.push(format!("title LIKE ?{}", params.len()));
+    }
+    if let Some(m) = missing {
+        conds.push(m.sql().to_string());
+    }
+    let wher = if conds.is_empty() { String::new() } else { format!(" WHERE {}", conds.join(" AND ")) };
+    params.push(limit.into());
+    let lim = params.len();
+    params.push(offset.into());
+    let off = params.len();
+    let stmt = db
+        .prepare(format!("SELECT {COLS} FROM entries{wher} ORDER BY updated_at DESC LIMIT ?{lim} OFFSET ?{off}"))
+        .bind(&params)?;
     let mut rows = stmt.all().await?.results::<Entry>()?;
     let more = rows.len() > PAGE_SIZE as usize;
     rows.truncate(PAGE_SIZE as usize);
@@ -236,6 +276,7 @@ struct ListQuery {
     kind: Option<Kind>,
     page: Option<u32>,
     q: Option<String>,
+    missing: Option<String>,
 }
 
 /// Compact JSON of every entry for client-side search/filter/sort. SQLite builds the string so the
@@ -264,7 +305,7 @@ async fn index_json(State(state): State<AppState>) -> AxumResponse {
 #[worker::send]
 async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> AxumResponse {
     let page = lq.page.unwrap_or(1).clamp(1, MAX_PAGE);
-    let (entries, more) = match load_entries(&state.env, lq.kind, None, page).await {
+    let (entries, more) = match load_entries(&state.env, lq.kind, None, None, page).await {
         Ok(r) => r,
         Err(e) => return internal(e).into_response(),
     };
@@ -383,8 +424,10 @@ async fn admin_page(State(state): State<AppState>, Query(lq): Query<ListQuery>) 
     admin_guard(&state.env)?;
     let page = lq.page.unwrap_or(1).clamp(1, MAX_PAGE);
     let q = lq.q.as_deref().map(str::trim).unwrap_or("");
-    let (entries, more) = load_entries(&state.env, None, Some(q), page).await.map_err(internal)?;
-    Ok(Html(admin_ui::page(&entries, page, more, q).into_string()))
+    let missing = lq.missing.as_deref().and_then(Missing::parse);
+    let (entries, more) = load_entries(&state.env, None, Some(q), missing, page).await.map_err(internal)?;
+    let missing = lq.missing.as_deref().filter(|_| missing.is_some()).unwrap_or("");
+    Ok(Html(admin_ui::page(&entries, page, more, q, missing).into_string()))
 }
 
 #[worker::send]

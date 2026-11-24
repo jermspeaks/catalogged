@@ -77,6 +77,10 @@ _Last reviewed: 2026-11-23, after PR #16._
 - Matching also retries a title without a parenthetical, with the parenthetical alone and without a subtitle, and treats number words as digits ("Seven" / "7"). On the real 2011 sheet: 66 sure matches, 48 to check, 10 none, of 124.
 - On the real 2010 sheet: 49 sure matches, 19 to check and 7 with no match, out of 75 (before: 41, 18 and 16).
 
+### Log imports
+- 2010 to 2016 of the owner's log are imported (755 entries by 2026-11-23): sheets from `scripts/log2csv.py`, ids from `match -i`, then `import` with a backup and a 10-row trial each time. The generator handles month headings with and without the year and markdown escapes.
+- Admin list filter: `/admin?missing=id|cover|any` (a dropdown beside the title filter) lists entries without a provider id and/or a cover; each row also shows "no id" and "no cover".
+
 ## Discovery items done (triaged 2026-11-23)
 
 - Seed the initial database (2010 imported; later years in plan.md).

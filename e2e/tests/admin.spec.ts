@@ -237,3 +237,32 @@ test('creator: shown and saved on the edit page, kind-specific label, manual add
   await expect(page.locator('#msg')).toContainText('Added "E2E Manual Creator"');
   expect((await entry(request, 'movie', 'e2e-manual-creator')).body.creator).toBe('Some Director');
 });
+
+test('admin list can show only entries missing an id or a cover', async ({ page, request }) => {
+  await seed(request, { kind: 'book', title: 'E2E Miss Bare' });
+  const r = await request.post('/admin/api/entries', {
+    data: { kind: 'movie', title: 'E2E Miss HasId', status: 'consumed', source: 'tmdb', external_id: '991122' },
+  });
+  expect(r.status(), await r.text()).toBe(200);
+
+  await page.goto('/admin?q=E2E Miss');
+  await expect(page.getByRole('link', { name: 'E2E Miss Bare' })).toBeVisible();
+  await expect(page.locator('li', { hasText: 'E2E Miss Bare' })).toContainText('no id');
+  await expect(page.locator('li', { hasText: 'E2E Miss HasId' })).not.toContainText('no id');
+
+  await page.goto('/admin?q=E2E Miss&missing=id');
+  await expect(page.getByRole('link', { name: 'E2E Miss Bare' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'E2E Miss HasId' })).toHaveCount(0);
+
+  for (const m of ['cover', 'any']) {
+    await page.goto(`/admin?q=E2E Miss&missing=${m}`);
+    await expect(page.getByRole('link', { name: 'E2E Miss Bare' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'E2E Miss HasId' })).toBeVisible();
+  }
+
+  // The dropdown keeps its choice, and an unknown value is ignored.
+  await page.goto('/admin?missing=id');
+  await expect(page.locator('select[name=missing]')).toHaveValue('id');
+  await page.goto('/admin?missing=bogus');
+  await expect(page.locator('select[name=missing]')).toHaveValue('');
+});
