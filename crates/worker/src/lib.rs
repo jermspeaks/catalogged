@@ -10,7 +10,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use catalogged_core::{igdb, imageurl, openlibrary, slugify, tmdb, EditEntry, Entry, Kind, NewEntry, MAX_COVER_BYTES};
+use catalogged_core::{igdb, imageurl, openlibrary, slugify, tmdb, EditEntry, Entry, Kind, NewEntry, Status, MAX_COVER_BYTES};
 use maud::{html, Markup, DOCTYPE};
 use serde::Deserialize;
 use tower_service::Service;
@@ -46,6 +46,8 @@ fn cover_src(env: &Env, key: &str) -> String {
 fn router(env: Env) -> Router {
     Router::new()
         .route("/", get(home))
+        .route("/in-progress", get(in_progress_page))
+        .route("/wanted", get(wanted_page))
         .route("/index.json", get(index_json))
         .route("/favicon.svg", get(|| async { ([(header::CONTENT_TYPE, "image/svg+xml"), (header::CACHE_CONTROL, "public, max-age=86400")], public_ui::FAVICON_SVG) }))
         .route("/manifest.webmanifest", get(|| async { ([(header::CONTENT_TYPE, "application/manifest+json"), (header::CACHE_CONTROL, "public, max-age=86400")], public_ui::MANIFEST) }))
@@ -132,7 +134,7 @@ fn join_origin(uri: &str, path_and_query: &str) -> String {
 /// The Cache API is per data centre, so this clears the copy where the admin's request ran; other
 /// locations expire on their own. A handful of cache operations per write, well under the subrequest limit.
 fn purge_paths(path: &str, extra: &[String]) -> Vec<String> {
-    let mut v: Vec<String> = vec!["/".into(), "/index.json".into()];
+    let mut v: Vec<String> = vec!["/".into(), "/in-progress".into(), "/wanted".into(), "/index.json".into()];
     v.extend(["movie", "show", "book", "game"].map(|k| format!("/?kind={k}")));
     let mut segs = path.trim_start_matches("/admin/api/entries").trim_matches('/').split('/');
     if let (Some(kind), Some(slug)) = (segs.next().filter(|s| !s.is_empty()), segs.next()) {
@@ -229,6 +231,7 @@ async fn load_entries(
     env: &Env,
     kind: Option<Kind>,
     q: Option<&str>,
+    status: Option<Status>,
     missing: Option<Missing>,
     by_logged: bool,
     page: u32,
@@ -246,6 +249,10 @@ async fn load_entries(
     if let Some(l) = like {
         params.push(l.into());
         conds.push(format!("title LIKE ?{}", params.len()));
+    }
+    if let Some(st) = status {
+        params.push(st.as_str().into());
+        conds.push(format!("status = ?{}", params.len()));
     }
     if let Some(m) = missing {
         conds.push(m.sql().to_string());
@@ -306,13 +313,29 @@ async fn index_json(State(state): State<AppState>) -> AxumResponse {
 
 #[worker::send]
 async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> AxumResponse {
+    status_page(state, lq, Status::Consumed).await
+}
+
+#[worker::send]
+async fn in_progress_page(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> AxumResponse {
+    status_page(state, lq, Status::InProgress).await
+}
+
+#[worker::send]
+async fn wanted_page(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> AxumResponse {
+    status_page(state, lq, Status::Wanted).await
+}
+
+/// One public list: the entries of a single status (consumed on `/`, in progress, wanted).
+async fn status_page(state: AppState, lq: ListQuery, status: Status) -> AxumResponse {
     let page = lq.page.unwrap_or(1).clamp(1, MAX_PAGE);
-    let (entries, more) = match load_entries(&state.env, lq.kind, None, None, true, page).await {
+    let (entries, more) = match load_entries(&state.env, lq.kind, None, Some(status), None, true, page).await {
         Ok(r) => r,
         Err(e) => return internal(e).into_response(),
     };
+    let base = public_ui::status_path(status);
     let link = |k: Option<Kind>, p: u32| {
-        let mut u = format!("/?page={p}");
+        let mut u = format!("{base}?page={p}");
         if let Some(k) = k {
             u.push_str(&format!("&kind={}", k.as_str()));
         }
@@ -322,17 +345,12 @@ async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Axu
         "catalogged",
         html! {
             header.top { h1 { "catalogged" } (public_ui::theme_picker()) }
+            (public_ui::status_tabs(status))
             form #controls hidden {
                 input type="search" name="q" placeholder="Search titles" aria-label="Search titles" autocomplete="off";
                 select name="kind" aria-label="Kind" {
                     option value="" { "All kinds" }
                     @for k in [Kind::Movie, Kind::Show, Kind::Game, Kind::Book] { option value=(k.as_str()) { (k.as_str()) "s" } }
-                }
-                select name="status" aria-label="Status" {
-                    option value="" { "Any status" }
-                    option value="consumed" { "Consumed" }
-                    option value="in_progress" { "In progress" }
-                    option value="wanted" { "Wanted" }
                 }
                 select name="sort" aria-label="Sort" {
                     option value="logged" { "Date logged" }
@@ -344,17 +362,17 @@ async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Axu
             }
             p #count {}
             nav #nav {
-                a href="/" { "all" }
-                @for k in [Kind::Movie, Kind::Show, Kind::Game, Kind::Book] { " · " a href={"/?kind=" (k.as_str())} { (k.as_str()) "s" } }
+                a href=(base) { "all" }
+                @for k in [Kind::Movie, Kind::Show, Kind::Game, Kind::Book] { " · " a href={(base) "?kind=" (k.as_str())} { (k.as_str()) "s" } }
             }
-            ul.grid #grid {
+            ul.grid #grid data-status=(status.as_str()) {
                 @for e in &entries {
                     li {
                         a href={"/entry/" (e.kind.as_str()) "/" (e.slug)} {
                             @if let Some(key) = &e.cover_key { img src=(cover_src(&state.env, key)) alt="" loading="lazy" width="300" height="450"; } @else { div.ph {} }
                             div { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
                         }
-                        small { (public_ui::meta_line(e.kind.as_str(), e.status.as_str(), e.rating, e.consumed_at.as_deref())) }
+                        small { (public_ui::meta_line(e.kind.as_str(), None, e.rating, e.consumed_at.as_deref())) }
                     }
                 }
             }
@@ -380,12 +398,12 @@ async fn entry_page(State(state): State<AppState>, Path((kind, slug)): Path<(Str
     let page_html = layout(
         &e.title,
         html! {
-            header.top { p { a href="/" { "← all" } } (public_ui::theme_picker()) }
+            header.top { p { a href=(public_ui::status_path(e.status)) { "← all" } } (public_ui::theme_picker()) }
             h1 { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
             @if let Some(c) = &e.creator { p { (c) } }
             p { small { a href={"/admin/edit/" (e.kind.as_str()) "/" (e.slug)} { "Edit" } } }
             @if let Some(key) = &e.cover_key { img.cover src=(cover_src(&e_env, key)) alt="" width="300" height="450"; } @else { div.cover.ph {} }
-            p { (public_ui::meta_line(e.kind.as_str(), e.status.as_str(), e.rating, e.consumed_at.as_deref())) }
+            p { (public_ui::meta_line(e.kind.as_str(), Some(e.status.as_str()), e.rating, e.consumed_at.as_deref())) }
             @if let Some(review) = &e.review {
                 @for para in review.split("\n\n") { p { (para) } }
             }
@@ -423,7 +441,7 @@ async fn admin_page(State(state): State<AppState>, Query(lq): Query<ListQuery>) 
     let page = lq.page.unwrap_or(1).clamp(1, MAX_PAGE);
     let q = lq.q.as_deref().map(str::trim).unwrap_or("");
     let missing = lq.missing.as_deref().and_then(Missing::parse);
-    let (entries, more) = load_entries(&state.env, None, Some(q), missing, false, page).await.map_err(internal)?;
+    let (entries, more) = load_entries(&state.env, None, Some(q), None, missing, false, page).await.map_err(internal)?;
     let missing = lq.missing.as_deref().filter(|_| missing.is_some()).unwrap_or("");
     Ok(Html(admin_ui::page(&entries, page, more, q, missing).into_string()))
 }

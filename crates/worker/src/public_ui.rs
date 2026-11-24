@@ -1,6 +1,7 @@
 //! Styles and client script for the public site. No framework: a small script enhances the
 //! server-rendered grid by loading the cached `/index.json` once and filtering locally, so
 //! search, filter and sort cost zero D1 reads.
+use catalogged_core::Status;
 
 /// Palette: #c6d8ff #71a9f7 #6b5ca5 #72195a #4c1036 (Periwinkle, Cool Horizon, Dusty Grape, Royal Plum, Crimson Violet).
 pub const CSS: &str = r#"
@@ -10,6 +11,9 @@ pub const CSS: &str = r#"
 *{box-sizing:border-box}
 body{font:16px/1.5 system-ui,sans-serif;max-width:64rem;margin:0 auto;padding:1.5rem 1rem 4rem;background:var(--bg);color:var(--fg)}
 a{color:var(--accent)}
+nav.tabs{display:flex;gap:.25rem;margin:.5rem 0 1rem;border-bottom:1px solid var(--line)}
+nav.tabs a{padding:.4rem .9rem;border-radius:.4rem .4rem 0 0;text-decoration:none;color:var(--muted)}
+nav.tabs a[aria-current]{color:var(--fg);font-weight:600;border:1px solid var(--line);border-bottom-color:var(--bg);margin-bottom:-1px}
 header.top{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
 h1{margin:.2em 0}
 #controls[hidden]{display:none}
@@ -66,7 +70,7 @@ const $=s=>document.querySelector(s);
 const grid=$('#grid'); if(!grid) return;
 const STEP=60;
 // Keep in step with rating_emoji() and month_year() below in this file's Rust helpers.
-const emoji=n=>['😖','🙁','😐','🙂','😍'][Math.min(4,Math.max(0,Math.ceil(n/2)-1))];
+const emoji=n=>['😖😖','😖','🙁🙁','🙁','😐','🙂','😄','😄😄','😍','🤩'][Math.min(10,Math.max(1,n))-1];
 const month=d=>{const m=+d.slice(5,7); return (m>=1&&m<=12?['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1]+' ':'')+d.slice(0,4)};
 const sorts={
  recent:(a,b)=>b.upd.localeCompare(a.upd),
@@ -76,17 +80,17 @@ const sorts={
  rating:(a,b)=>(b.rating||0)-(a.rating||0)};
 fetch('/index.json').then(r=>r.ok?r.json():Promise.reject(r.status)).then(d=>{
  const items=d.items.map(a=>({kind:a[0],slug:a[1],title:a[2],status:a[3],rating:a[4],year:a[5],cover:a[6],date:a[7],upd:a[8],lc:(a[2]+' '+(a[9]||'')).toLowerCase()}));
- const f=$('#controls'), q=f.q, kind=f.kind, status=f.status, sort=f.sort;
+ const f=$('#controls'), q=f.q, kind=f.kind, sort=f.sort, status=grid.dataset.status;
  const p=new URLSearchParams(location.search);
- q.value=p.get('q')||''; kind.value=p.get('kind')||''; status.value=p.get('status')||''; sort.value=sorts[p.get('sort')]?p.get('sort'):'logged';
+ q.value=p.get('q')||''; kind.value=p.get('kind')||''; sort.value=sorts[p.get('sort')]?p.get('sort'):'logged';
  f.hidden=false; for(const id of ['#nav','#pager']){const n=$(id); if(n) n.hidden=true}
  let shown=STEP;
  const more=document.createElement('button'); more.className='more'; more.type='button'; more.textContent='Show more';
  more.onclick=()=>{shown+=STEP;draw()}; grid.after(more);
  function draw(){
   const t=q.value.trim().toLowerCase();
-  const list=items.filter(e=>(!kind.value||e.kind===kind.value)&&(!status.value||e.status===status.value)&&(!t||e.lc.includes(t))).sort(sorts[sort.value]);
-  const u=new URLSearchParams(); if(t)u.set('q',q.value.trim()); if(kind.value)u.set('kind',kind.value); if(status.value)u.set('status',status.value); if(sort.value!=='logged')u.set('sort',sort.value);
+  const list=items.filter(e=>(!kind.value||e.kind===kind.value)&&e.status===status&&(!t||e.lc.includes(t))).sort(sorts[sort.value]);
+  const u=new URLSearchParams(); if(t)u.set('q',q.value.trim()); if(kind.value)u.set('kind',kind.value); if(sort.value!=='logged')u.set('sort',sort.value);
   history.replaceState(null,'',u.toString()?'?'+u:location.pathname);
   $('#count').textContent=list.length+(list.length===1?' entry':' entries');
   grid.replaceChildren(...list.slice(0,shown).map(e=>{
@@ -96,14 +100,14 @@ fetch('/index.json').then(r=>r.ok?r.json():Promise.reject(r.status)).then(d=>{
    else{img=document.createElement('div');img.className='ph'}
    const t2=document.createElement('div'); t2.textContent=e.title+(e.year?' ('+e.year+')':'');
    a.append(img,t2);
-   const s=document.createElement('small'); s.append(e.kind+(e.status!=='consumed'?' · '+e.status.replace('_',' '):''));
+   const s=document.createElement('small'); s.append(e.kind);
    if(e.rating){const r=document.createElement('span'); r.textContent=emoji(e.rating); r.title=e.rating+'/10'; r.setAttribute('role','img'); r.setAttribute('aria-label',e.rating+' out of 10'); s.append(' · ',r)}
    if(e.date) s.append(' · '+month(e.date));
    li.append(a,s); return li}));
   more.hidden=list.length<=shown;
  }
  let timer; q.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{shown=STEP;draw()},120)};
- for(const c of [kind,status,sort]) c.onchange=()=>{shown=STEP;draw()};
+ for(const c of [kind,sort]) c.onchange=()=>{shown=STEP;draw()};
  f.onsubmit=e=>e.preventDefault();
  draw();
 }).catch(()=>{});
@@ -136,9 +140,30 @@ pub const MANIFEST: &str = r##"{"name":"catalogged","short_name":"catalogged","s
 /// Head links for the favicon and web manifest (routes in lib.rs).
 pub const FAVICON_LINKS: &str = r##"<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#4c1036">"##;
 
-/// The 1 to 10 rating as a face (two ratings per face). Mirrors `emoji` in the grid script.
+/// The 1 to 10 rating as faces: 1 😖😖, 2 😖, 3 🙁🙁, 4 🙁, 5 😐, 6 🙂, 7 😄, 8 😄😄, 9 😍, 10 🤩.
+/// Mirrors `emoji` in the grid script.
 pub fn rating_emoji(r: u8) -> &'static str {
-    ["😖", "🙁", "😐", "🙂", "😍"][usize::from(r.clamp(1, 10).div_ceil(2) - 1)]
+    ["😖😖", "😖", "🙁🙁", "🙁", "😐", "🙂", "😄", "😄😄", "😍", "🤩"][usize::from(r.clamp(1, 10) - 1)]
+}
+
+/// The path of the public list for a status.
+pub fn status_path(s: Status) -> &'static str {
+    match s {
+        Status::Consumed => "/",
+        Status::InProgress => "/in-progress",
+        Status::Wanted => "/wanted",
+    }
+}
+
+/// The top navigation between the three lists (plain links, so it works without JavaScript).
+pub fn status_tabs(current: Status) -> maud::Markup {
+    maud::html! {
+        nav.tabs aria-label="Lists" {
+            @for (s, label) in [(Status::Consumed, "Consumed"), (Status::InProgress, "In progress"), (Status::Wanted, "Wanted")] {
+                a href=(status_path(s)) aria-current=[(s == current).then_some("page")] { (label) }
+            }
+        }
+    }
 }
 
 /// `2015-03-19` as `Mar 2015`. The log never tracked the day before 2016, so only month and year are shown.
@@ -151,12 +176,12 @@ pub fn month_year(date: &str) -> String {
     }
 }
 
-/// The small line under a card or on a detail page: kind, a status label unless it is the assumed
-/// `consumed`, the rating as a face, and when it was logged.
-pub fn meta_line(kind: &str, status: &str, rating: Option<u8>, consumed_at: Option<&str>) -> maud::Markup {
+/// The small line under a card or on a detail page: kind, a status label (detail pages only, and not
+/// the assumed `consumed`), the rating as a face, and when it was logged.
+pub fn meta_line(kind: &str, status: Option<&str>, rating: Option<u8>, consumed_at: Option<&str>) -> maud::Markup {
     maud::html! {
         (kind)
-        @if status != "consumed" { " · " (status.replace('_', " ")) }
+        @if let Some(st) = status.filter(|s| *s != "consumed") { " · " (st.replace('_', " ")) }
         @if let Some(r) = rating { " · " span role="img" title={(r) "/10"} aria-label={(r) " out of 10"} { (rating_emoji(r)) } }
         @if let Some(d) = consumed_at.filter(|d| !d.is_empty()) { " · " (month_year(d)) }
     }
@@ -169,7 +194,7 @@ mod tests {
     #[test]
     fn faces_cover_the_whole_scale() {
         let faces: Vec<_> = (1..=10).map(rating_emoji).collect();
-        assert_eq!(faces, ["😖", "😖", "🙁", "🙁", "😐", "😐", "🙂", "🙂", "😍", "😍"]);
+        assert_eq!(faces, ["😖😖", "😖", "🙁🙁", "🙁", "😐", "🙂", "😄", "😄😄", "😍", "🤩"]);
     }
 
     #[test]

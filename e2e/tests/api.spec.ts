@@ -94,6 +94,12 @@ test('writes clear the cached public pages (cache on, as in production)', async 
   await home();
   expect((await request.get('/index.json')).headers()['cache-control']).toContain('max-age');
 
+  // The status lists are cached too and cleared on writes.
+  const wanted = async () => (await request.get('/wanted')).text();
+  expect(await wanted()).not.toContain('E2E Purge Wanted');
+  await seed(request, { kind: 'show', title: 'E2E Purge Wanted', status: 'wanted' });
+  expect(await wanted()).toContain('E2E Purge Wanted');
+
   const slug = await seed(request, { kind: 'show', title: 'E2E Purge Me' });
   expect(await titles()).toContain('E2E Purge Me'); // create
   expect(await home()).toContain('E2E Purge Me');
