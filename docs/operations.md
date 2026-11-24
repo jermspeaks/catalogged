@@ -74,5 +74,5 @@ Look at these once a fortnight until you trust the numbers (no API token needed,
 - Billing: the low-spend alert you set up is the backstop for R2, the only thing that can bill.
 
 Expected at personal scale: a few hundred requests a day, tens of thousands of D1 rows read at
-most (each `/index.json` rebuild reads the whole table, at most every 15 min per edge location).
+most (each `/index.json` rebuild reads the whole table, at most every 15 min per edge location; measured 2026-11-23 at 1,949 entries: 1,949 rows, 31 ms, see plan.md P2).
 If a number is far above that, check for a loop in a script before anything else.
