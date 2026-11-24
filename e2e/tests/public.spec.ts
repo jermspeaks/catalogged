@@ -136,3 +136,25 @@ test('default order is date logged, newest first, undated last (grid and no-JS l
   expect([...pos].sort((a, b) => a - b)).toEqual(pos);
   await ctx.close();
 });
+
+test('cards and detail pages: no "consumed" label, ratings as faces, month and year logged (grid, no-JS list, detail)', async ({ page, browser }) => {
+  const small = (p: import('@playwright/test').Page, t: string) => p.locator('#grid li', { hasText: t }).locator('small');
+  await page.goto('/?q=zzpub');
+  await expect(small(page, 'Zzpub Alpha')).toHaveText('movie · 😍 · Mar 2024'); // consumed is assumed, 9/10, logged 2024-03-01
+  await expect(small(page, 'Zzpub Alpha').locator('[title="9/10"]')).toHaveCount(1);
+  await expect(small(page, 'Zzpub Gamma')).toHaveText('game · in progress · 🙂'); // 7/10, no date
+  await expect(small(page, 'Zzpub Beta')).toHaveText('book · wanted');
+  await expect(page.locator('#grid')).not.toContainText('/10');
+  await expect(page.locator('#grid')).not.toContainText('consumed');
+
+  const ctx = await browser.newContext({ javaScriptEnabled: false }); // the server-rendered list says the same
+  const p = await ctx.newPage();
+  await p.goto('/');
+  await expect(small(p, 'Zzpub Alpha')).toHaveText('movie · 😍 · Mar 2024');
+  await expect(small(p, 'Zzpub Gamma')).toHaveText('game · in progress · 🙂');
+  await ctx.close();
+
+  await page.goto('/?q=zzpub alpha');
+  await page.locator('#grid li a').first().click();
+  await expect(page.locator('p', { hasText: 'movie' }).first()).toHaveText('movie · 😍 · Mar 2024');
+});
