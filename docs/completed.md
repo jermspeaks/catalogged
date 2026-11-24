@@ -84,6 +84,9 @@ _Last reviewed: 2026-11-23, after PR #16._
 ### Identify (edit page)
 - The edit page's cover finder is now **Identify**: search the provider (prefilled with the title), pick a record, and its title, year, creator, provider id and cover replace the current ones and the entry is saved in one step (rating, review, status and date are kept; the slug never changes). A record without a cover keeps the current cover. This replaces "Find a cover"; the CLI side is plan P2.
 
+### Default sort is date logged
+- The public grid, the server-rendered first page and `/index.json` now default to date logged, newest first, undated entries last, ties by last update. "Recently updated" is still a sort option; the admin list stays by last update. Migration `0004` adds indexes on `(consumed_at DESC, updated_at DESC)` (and by kind) so a page reads about 60 rows.
+
 ## Discovery items done (triaged 2026-11-23)
 
 - Seed the initial database (2010 imported; later years in plan.md).

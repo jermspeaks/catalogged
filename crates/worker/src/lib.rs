@@ -230,6 +230,7 @@ async fn load_entries(
     kind: Option<Kind>,
     q: Option<&str>,
     missing: Option<Missing>,
+    by_logged: bool,
     page: u32,
 ) -> Result<(Vec<Entry>, bool)> {
     let db = env.d1("DB")?;
@@ -254,8 +255,9 @@ async fn load_entries(
     let lim = params.len();
     params.push(offset.into());
     let off = params.len();
+    let order = if by_logged { "consumed_at DESC, updated_at DESC" } else { "updated_at DESC" };
     let stmt = db
-        .prepare(format!("SELECT {COLS} FROM entries{wher} ORDER BY updated_at DESC LIMIT ?{lim} OFFSET ?{off}"))
+        .prepare(format!("SELECT {COLS} FROM entries{wher} ORDER BY {order} LIMIT ?{lim} OFFSET ?{off}"))
         .bind(&params)?;
     let mut rows = stmt.all().await?.results::<Entry>()?;
     let more = rows.len() > PAGE_SIZE as usize;
@@ -284,7 +286,7 @@ struct ListQuery {
 /// the whole table once, so this bounds the D1 read cost (~5k rows per miss).
 #[worker::send]
 async fn index_json(State(state): State<AppState>) -> AxumResponse {
-    let q = "SELECT json_group_array(json(a)) AS j FROM (SELECT json_array(kind, slug, title, status, rating, year, cover_key, consumed_at, updated_at, creator) AS a FROM entries ORDER BY updated_at DESC)";
+    let q = "SELECT json_group_array(json(a)) AS j FROM (SELECT json_array(kind, slug, title, status, rating, year, cover_key, consumed_at, updated_at, creator) AS a FROM entries ORDER BY consumed_at DESC, updated_at DESC)";
     let row = async {
         state.env.d1("DB")?.prepare(q).first::<serde_json::Value>(None).await
     }
@@ -305,7 +307,7 @@ async fn index_json(State(state): State<AppState>) -> AxumResponse {
 #[worker::send]
 async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> AxumResponse {
     let page = lq.page.unwrap_or(1).clamp(1, MAX_PAGE);
-    let (entries, more) = match load_entries(&state.env, lq.kind, None, None, page).await {
+    let (entries, more) = match load_entries(&state.env, lq.kind, None, None, true, page).await {
         Ok(r) => r,
         Err(e) => return internal(e).into_response(),
     };
@@ -333,8 +335,8 @@ async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Axu
                     option value="wanted" { "Wanted" }
                 }
                 select name="sort" aria-label="Sort" {
-                    option value="recent" { "Recently updated" }
                     option value="logged" { "Date logged" }
+                    option value="recent" { "Recently updated" }
                     option value="title" { "Title" }
                     option value="year" { "Year" }
                     option value="rating" { "Rating" }
@@ -425,7 +427,7 @@ async fn admin_page(State(state): State<AppState>, Query(lq): Query<ListQuery>) 
     let page = lq.page.unwrap_or(1).clamp(1, MAX_PAGE);
     let q = lq.q.as_deref().map(str::trim).unwrap_or("");
     let missing = lq.missing.as_deref().and_then(Missing::parse);
-    let (entries, more) = load_entries(&state.env, None, Some(q), missing, page).await.map_err(internal)?;
+    let (entries, more) = load_entries(&state.env, None, Some(q), missing, false, page).await.map_err(internal)?;
     let missing = lq.missing.as_deref().filter(|_| missing.is_some()).unwrap_or("");
     Ok(Html(admin_ui::page(&entries, page, more, q, missing).into_string()))
 }
