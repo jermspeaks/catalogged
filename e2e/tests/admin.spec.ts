@@ -123,35 +123,41 @@ test('adding a duplicate reports the error', async ({ page, request }) => {
   await expect(page.locator('#msg')).toContainText('409');
 });
 
-test('edit page: find a cover by searching sources (provider mocked)', async ({ page, request }) => {
-  const slug = await seed(request, { kind: 'movie', title: 'E2E Cover Search', status: 'consumed' });
+test('edit page: identify from a provider search replaces title, year, creator, id and cover in one step (provider mocked)', async ({ page, request }) => {
+  const slug = await seed(request, { kind: 'movie', title: 'e2e identfy typo', status: 'consumed', rating: 8, review: 'keep me', creator: 'Wrong Person', year: 1999 });
   await page.route('**/mock-poster.png', (r) => r.fulfill({ contentType: 'image/png', body: png(200, 300) }));
   let searched = '';
   await page.route('**/admin/api/search*', (r) => {
     searched = new URL(r.request().url()).searchParams.get('q') ?? '';
     return r.fulfill({ json: [
-      { id: '1', title: 'No Cover Film', year: 2001, cover_url: null, thumb_url: null, overview: null },
-      { id: '2', title: 'E2E Cover Search', year: 2019, cover_url: 'http://localhost:8788/mock-poster.png', thumb_url: null, overview: null },
+      { id: '1', title: 'No Cover Film', year: 2001, cover_url: null, thumb_url: null, overview: null, creator: 'Nobody' },
+      { id: '2', title: 'E2E Identify Film', year: 2019, cover_url: 'http://localhost:8788/mock-poster.png', thumb_url: null, overview: null, creator: 'Right Person' },
     ] });
   });
   await page.goto(`/admin/edit/movie/${slug}`);
-  await expect(page.locator('#coverq')).toHaveValue('E2E Cover Search'); // prefilled with the title
-  await page.locator('summary', { hasText: 'Find a cover' }).click();
+  await expect(page.locator('#coverq')).toHaveValue('e2e identfy typo'); // prefilled with the title
+  await page.locator('summary', { hasText: 'Identify' }).click();
   await page.locator('#coversearch').getByRole('button', { name: 'Search' }).click();
-  await expect(page.locator('#coverresults li')).toHaveCount(1); // results without a cover are hidden
-  await page.getByRole('button', { name: 'Use this cover' }).click();
-  await expect(page.locator('#msg')).toContainText('Cover updated');
-  expect(searched).toBe('E2E Cover Search');
-  // picking the record also fills the provider id and year in the (unsaved) form
+  await expect(page.locator('#coverresults li')).toHaveCount(2); // records without a cover are listed too
+  await page.locator('#coverresults li', { hasText: 'E2E Identify Film' }).getByRole('button', { name: 'Use this record' }).click();
+  await expect(page.locator('#msg')).toContainText('Identified as "E2E Identify Film" and saved');
+  expect(searched).toBe('e2e identfy typo');
+  // the form shows the provider's values, and the entry was saved without a separate Save click
+  await expect(page.locator('input[name=title]')).toHaveValue('E2E Identify Film');
   await expect(page.locator('input[name=external_id]')).toHaveValue('2');
   await expect(page.locator('input[name=year]')).toHaveValue('2019');
+  await expect(page.locator('input[name=creator]')).toHaveValue('Right Person');
   await expect(page.locator('#coverph')).toHaveCount(0); // placeholder replaced by the new cover
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.locator('#msg')).toContainText('Saved');
-  expect((await entry(request, 'movie', slug)).body).toMatchObject({ source: 'tmdb', external_id: '2', year: 2019 });
-  const src = (await page.locator('#coverimg').getAttribute('src'))!;
-  expect((await entry(request, 'movie', slug)).body.cover_key).toMatch(/^movie\/.+-[0-9a-f]{8}\.webp$/);
-  expect((await request.get(src)).status()).toBe(200);
+  const { body } = await entry(request, 'movie', slug); // the slug never changes
+  expect(body).toMatchObject({ title: 'E2E Identify Film', source: 'tmdb', external_id: '2', year: 2019, creator: 'Right Person', rating: 8, review: 'keep me' });
+  expect(body.cover_key).toMatch(/^movie\/.+-[0-9a-f]{8}\.webp$/);
+  expect((await request.get(`/covers/${body.cover_key}`)).status()).toBe(200);
+
+  // A record without a cover still replaces the metadata and keeps the cover that is there.
+  await page.locator('#coverresults li', { hasText: 'No Cover Film' }).getByRole('button', { name: 'Use this record' }).click();
+  await expect(page.locator('#msg')).toContainText('no cover');
+  const after = (await entry(request, 'movie', slug)).body;
+  expect(after).toMatchObject({ title: 'No Cover Film', external_id: '1', creator: 'Nobody', cover_key: body.cover_key });
 });
 
 test('edit page: cover from a link falls back to the Worker relay when the host blocks the browser', async ({ page, request }) => {
@@ -204,7 +210,7 @@ test('edit page: placeholder without a cover, toast and busy state while saving'
   await expect(page.locator('#msg')).toHaveClass(/err/); // failures are styled, not just text
 });
 
-test('creator: shown and saved on the edit page, kind-specific label, manual add, and filled from a cover pick', async ({ page, request }) => {
+test('creator: shown and saved on the edit page, kind-specific label, manual add, and filled by identify', async ({ page, request }) => {
   const slug = await seed(request, { kind: 'book', title: 'E2E Creator Book', creator: 'Old Author' });
   await page.goto(`/admin/edit/book/${slug}`);
   await expect(page.getByLabel('Author')).toHaveValue('Old Author');
@@ -223,10 +229,12 @@ test('creator: shown and saved on the edit page, kind-specific label, manual add
   await page.route('**/mock-poster.png', (r) => r.fulfill({ contentType: 'image/png', body: png(100, 150) }));
   await page.route('**/admin/api/search*', (r) =>
     r.fulfill({ json: [{ id: '113112', title: 'E2E Creator Game', year: 2020, cover_url: 'http://localhost:8788/mock-poster.png', thumb_url: null, overview: null, creator: 'Supergiant Games' }] }));
-  await page.locator('summary', { hasText: 'Find a cover' }).click();
+  await page.locator('summary', { hasText: 'Identify' }).click();
   await page.locator('#coversearch').getByRole('button', { name: 'Search' }).click();
-  await page.getByRole('button', { name: 'Use this cover' }).click();
+  await page.getByRole('button', { name: 'Use this record' }).click();
   await expect(page.getByLabel('Developer')).toHaveValue('Supergiant Games');
+  await expect(page.locator('#msg')).toContainText('saved');
+  expect((await entry(request, 'game', g)).body.creator).toBe('Supergiant Games');
 
   await page.goto('/admin');
   await page.locator('summary', { hasText: 'Add manually' }).click();

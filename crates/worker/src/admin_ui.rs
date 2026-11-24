@@ -180,33 +180,45 @@ $('#coverfile').addEventListener('change', (ev) => { const file = ev.target.file
 // Cover from a link (the Worker relays the image because most hosts block direct reads).
 $('#coverlink').addEventListener('submit', (ev) => { ev.preventDefault(); busy(ev.target, () => setCover($('#coverurl').value.trim())); });
 
-// Cover from a provider search (same sources as adding an entry).
+// Identify: search the provider, pick the record, and it replaces the title, year, creator, provider id and cover.
 $('#coversearch').addEventListener('submit', (ev) => { ev.preventDefault(); busy(ev.target, coverSearch); });
 async function coverSearch() {
   const q = $('#coverq').value.trim(); if (!q) return;
   msg('Searching…');
   const r = await fetch(`/admin/api/search?kind=${kind}&q=${encodeURIComponent(q)}`);
   if (!r.ok) { msg(`Search failed: ${r.status} ${(await r.text()).slice(0, 120)}`); return; }
-  const items = (await r.json()).filter((c) => c.cover_url);
-  msg(items.length ? '' : 'No results with a cover.');
+  const items = await r.json();
+  msg(items.length ? '' : 'No results.');
   const ul = $('#coverresults'); ul.replaceChildren();
   for (const c of items) {
     const li = document.createElement('li');
     if (c.thumb_url) { const im = document.createElement('img'); im.src = c.thumb_url; im.width = 46; im.alt = ''; li.append(im); }
-    const label = document.createElement('span'); label.textContent = ` ${c.title}${c.year ? ` (${c.year})` : ''} `;
-    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = 'Use this cover';
-    btn.onclick = async () => {
-      await setCover(c.cover_url);
-      // Picking the record is also saying which record this is: fill the provider id (and year) in the form.
-      const f = form.elements;
-      if (!f.external_id.value.trim()) {
-        f.external_id.value = c.id; if (!f.year.value && c.year) f.year.value = c.year;
-        if (!f.creator.value.trim() && c.creator) f.creator.value = c.creator;
-        msg('Cover updated ✓ and the provider id filled in: press Save to keep it', 'ok');
-      }
-    };
+    const label = document.createElement('span'); label.textContent = ` ${c.title}${c.year ? ` (${c.year})` : ''}${c.creator ? ` · ${c.creator}` : ''} `;
+    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = 'Use this record';
+    btn.onclick = () => busy(li, () => identify(c));
     li.append(label, btn); ul.append(li);
   }
+}
+
+async function identify(c) {
+  const f = form.elements;
+  f.title.value = c.title;
+  f.external_id.value = c.id;
+  f.year.value = c.year || '';
+  f.creator.value = c.creator || '';
+  let coverNote = '';
+  if (c.cover_url) {
+    msg('Converting and uploading the cover…');
+    try {
+      const { url } = await putCover(kind, slug, c.cover_url);
+      $('#coverph')?.remove();
+      let img = $('#coverimg');
+      if (!img) { img = document.createElement('img'); img.id = 'coverimg'; img.className = 'cover'; img.alt = ''; $('#coverbox').prepend(img); }
+      img.src = url;
+    } catch (e) { coverNote = ` (the cover failed: ${e.message}; keep the old one or add one by hand)`; }
+  } else { coverNote = ' (this record has no cover; the current one is kept)'; }
+  await save();
+  const m = $('#msg'); if (m.classList.contains('ok')) msg(`Identified as "${c.title}" and saved ✓${coverNote}`, coverNote ? 'err' : 'ok');
 }
 
 const dlg = $('#confirm');
@@ -357,7 +369,7 @@ pub fn edit_page(e: &Entry, cover_url: Option<String>) -> Markup {
             @if let Some(u) = &cover_url { img #coverimg.cover src=(u) alt=""; } @else { div #coverph.cover.ph {} }
             label { "Upload or replace cover " input #coverfile type="file" accept="image/*"; }
             details {
-                summary { "Find a cover (search " (e.kind.as_str()) " sources)" }
+                summary { "Identify (search " (e.kind.as_str()) " sources: replaces title, year, " (creator_label(e.kind).to_lowercase()) ", id and cover)" }
                 form #coversearch.row {
                     input #coverq type="search" value=(e.title) required;
                     button type="submit" { "Search" }

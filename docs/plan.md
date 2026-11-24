@@ -39,11 +39,8 @@ Ordered by value for the owner's actual goal (a complete, good-looking catalogue
 - Check the 10-row trial for hand-picked mismatches: a wrong pick during `match -i` (for example a 2015 short instead of the 2014 *Birdman*) imports quietly. The CSV `creator` column is copied onto the entry, so correct it in the sheet too.
 - Known loose ends from 2010 to 2016 (edit page): entries with no provider id or cover (use the new "missing" filter in `/admin`), four books saved with Open Library edition ids (`OL…M`, which no lookup accepts), nine entries with an id but no year, and six with no creator. Covers whose posters are WebP failed to decode in the CLI (see P8).
 
-### P2. Identify (M)
-New idea from the owner (2026-11-23): replace the cover finder with an **identify** action that grabs all metadata from the provider and the cover, including the title.
-- Edit page: search a provider, pick a record, and apply its title, year, creator, provider id and cover in one step (today Find a cover sets the cover, and fills the id, year and creator only if they are empty).
-- CLI: `catalogged covers` grows into (or is joined by) `identify`, which also corrects titles from the provider's spelling. Needs a decision on whether the provider's title should overwrite a hand-typed one (the slug never changes either way).
-- Pairs with P1: after each import the leftovers are the rows that did not match, and this is the fast way to fix them by hand.
+### P2. Identify in the CLI (S)
+The edit page now has **Identify** (see completed.md): pick a provider record and it replaces the title, year, creator, provider id and cover and saves. Still open is the CLI side: `catalogged identify --kind K --slug S [--external-id ID]` (search by the entry's title and pick, or fetch the given id) applying the same fields, and a bulk mode for the leftovers of an import. It overwrites hand-typed titles on purpose (the slug never changes), so it should show a before and after and ask unless `--yes`.
 
 ### P3. Default public sort is date logged (S)
 New idea from the owner (2026-11-23). The grid defaults to "recent" (last updated). Make "date logged" the default: the sort control, the order of `/index.json` (it is `updated_at DESC` today), and the server-rendered first page. Entries without a date sort last.
