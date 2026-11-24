@@ -4,4 +4,4 @@ Ideas and reference material. Every idea here has been triaged (2026-11-23): fin
 
 ## New ideas
 
-_None open._ (Triaged 2026-11-23: "identify" is P2 in plan.md and the default sort by date logged is done; dropping "consumed", the date logged and emoji ratings on the public pages are P3.)
+_None open._ (Triaged 2026-11-23: "identify" and the default sort by date logged are done; dropping "consumed", the date logged and emoji ratings on the public pages are P2.)

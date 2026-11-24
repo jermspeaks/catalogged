@@ -67,6 +67,9 @@ cargo run -p catalogged-cli -- edit --kind movie --slug some-film --external-id 
 cargo run -p catalogged-cli -- edit --kind movie --slug some-film --rating 9 --review "Better on rewatch"          # only passed flags change
 cargo run -p catalogged-cli -- delete --kind movie --slug some-film --yes                                          # also removes the cover
 cargo run -p catalogged-cli -- match log.csv log-matched.csv -i                      # find provider ids for rows that have none; review before importing
+cargo run -p catalogged-cli -- identify --kind movie --slug birdman            # search the provider, pick a record, see before/after, confirm: replaces title, year, creator, id and cover
+cargo run -p catalogged-cli -- identify --kind movie --slug birdman --external-id 194662   # same with a known provider id (--query "other text" to search differently, --yes, --dry-run)
+cargo run -p catalogged-cli -- identify --kind book --limit 10                   # no --slug: walk the entries that have no cover, one by one
 cargo run -p catalogged-cli -- covers --dry-run                                   # find covers for entries that have none (re-runnable; --kind, --limit, --accept-check)
 cargo run -p catalogged-cli -- import entries.csv --dry-run
 cargo run -p catalogged-cli -- import entries.csv                                 # --no-cover to skip covers, --skip-existing to re-run safely

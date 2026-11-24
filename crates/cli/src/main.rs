@@ -145,6 +145,32 @@ enum Cmd {
         #[arg(long, conflicts_with = "ids_only")]
         creators: bool,
     },
+    /// Replace an entry's title, year, creator, provider id and cover with a provider record, showing
+    /// before and after and asking first. With --kind and --slug: one entry (searches by its title, or
+    /// fetches --external-id). With neither --slug nor --external-id: walks the entries that have no
+    /// cover, one by one. Rating, review, status and date are kept; the slug never changes.
+    Identify {
+        /// game | book | show | movie (required with --slug; otherwise limits the walk to this kind)
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        slug: Option<String>,
+        /// Use this provider record instead of searching (needs --slug)
+        #[arg(long, requires = "slug")]
+        external_id: Option<String>,
+        /// Search for this text instead of the entry's title (needs --slug)
+        #[arg(long, requires = "slug", conflicts_with = "external_id")]
+        query: Option<String>,
+        /// Apply without the "apply?" question (you still pick the record when searching)
+        #[arg(long)]
+        yes: bool,
+        /// Show what would change; send nothing to the Worker
+        #[arg(long)]
+        dry_run: bool,
+        /// Stop after this many entries when walking
+        #[arg(long)]
+        limit: Option<usize>,
+    },
     /// Find provider ids for rows that have none: searches TMDB / Open Library / IGDB by title (and
     /// author for books) and writes a new CSV with source, external_id and year filled in, plus
     /// match (high | check | none), match_title and candidates columns to review before `import`.
@@ -841,6 +867,143 @@ fn find_covers(client: &Client, meta: &Meta, only: Option<Kind>, dry_run: bool, 
     Ok(())
 }
 
+/// What replacing `cur` with the provider record `c` would change, one line per field.
+fn identify_diff(cur: &Entry, c: &Candidate) -> Vec<String> {
+    let mut out = vec![];
+    let mut line = |name: &str, old: Option<String>, new: Option<String>| {
+        if old != new {
+            out.push(format!("  {name:<8} {}  ->  {}", old.unwrap_or_else(|| "-".into()), new.unwrap_or_else(|| "-".into())));
+        }
+    };
+    line("title", Some(cur.title.clone()), Some(c.title.clone()));
+    line("year", cur.year.map(|y| y.to_string()), c.year.map(|y| y.to_string()).or(cur.year.map(|y| y.to_string())));
+    line("creator", cur.creator.clone(), c.creator.clone().or_else(|| cur.creator.clone()));
+    line("id", cur.external_id.clone(), Some(c.id.clone()));
+    line("cover", cur.cover_key.as_ref().map(|_| "current".to_string()), c.cover_url.as_ref().map(|_| "provider's".to_string()).or(cur.cover_key.as_ref().map(|_| "current".to_string())));
+    out
+}
+
+fn confirm(prompt: &str) -> Result<bool> {
+    use std::io::Write;
+    print!("{prompt} [Y/n] ");
+    std::io::stdout().flush()?;
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line)? == 0 {
+        return Ok(false);
+    }
+    Ok(matches!(line.trim().to_lowercase().as_str(), "" | "y" | "yes"))
+}
+
+/// The full record for a picked search result (TMDB search results carry no director); falls back to the result itself.
+fn full_record(meta: &Meta, kind: Kind, c: &Candidate) -> Candidate {
+    match meta.details(kind, &c.id) {
+        Ok(d) => Candidate { cover_url: d.cover_url.or_else(|| c.cover_url.clone()), year: d.year.or(c.year), ..d },
+        Err(_) => c.clone(),
+    }
+}
+
+/// Show the change, ask (unless `yes`), then save it and replace the cover. Returns whether it was applied.
+fn apply_identify(client: &Client, meta: &Meta, kind: Kind, slug: &str, c: &Candidate, yes: bool, dry_run: bool) -> Result<bool> {
+    let cur = client.get_entry(kind, slug)?;
+    let diff = identify_diff(&cur, c);
+    println!("\n{} [{}]", cur.title, slug);
+    if diff.is_empty() {
+        println!("  already matches");
+        return Ok(false);
+    }
+    for l in &diff {
+        println!("{l}");
+    }
+    if dry_run {
+        return Ok(false);
+    }
+    if !yes && !confirm("  apply?")? {
+        println!("  skipped");
+        return Ok(false);
+    }
+    let edit = EditEntry {
+        title: c.title.clone(),
+        status: cur.status,
+        rating: cur.rating,
+        review: cur.review.clone(),
+        year: c.year.or(cur.year),
+        consumed_at: cur.consumed_at.clone(),
+        source: Some(default_source(kind)),
+        external_id: Some(c.id.clone()),
+        creator: c.creator.clone().or_else(|| cur.creator.clone()),
+    };
+    edit.validate_for(kind).map_err(anyhow::Error::msg)?;
+    // Cover first: if the provider's poster cannot be decoded the metadata is still saved and the old cover stays.
+    let cover = c.cover_url.as_deref().map(|u| meta.cover_webp(u).and_then(|w| client.put_cover(kind, slug, w)));
+    client.edit_entry(kind, slug, &edit)?;
+    match cover {
+        Some(Err(e)) => println!("  saved, but the cover failed: {e:#}"),
+        Some(Ok(())) => println!("  saved with the new cover"),
+        None => println!("  saved (the provider has no cover)"),
+    }
+    Ok(true)
+}
+
+/// Identify entries (see `Cmd::Identify`).
+#[allow(clippy::too_many_arguments)]
+fn identify(client: &Client, meta: &Meta, kind: Option<Kind>, slug: Option<&str>, external_id: Option<&str>, query: Option<&str>, yes: bool, dry_run: bool, limit: Option<usize>) -> Result<()> {
+    if let Some(slug) = slug {
+        let kind = kind.context("--slug needs --kind")?;
+        let cur = client.get_entry(kind, slug)?;
+        let found = if let Some(id) = external_id {
+            meta.details(kind, id).with_context(|| format!("looking up {id}"))?
+        } else {
+            let q = query.unwrap_or(&cur.title);
+            let found = released_by(meta.search(kind, q)?, cur.consumed_at.as_deref());
+            let (suggested, conf) = matching::pick(q, cur.year, cur.creator.as_deref(), &found);
+            match ask(&cur.title, cur.year, cur.creator.as_deref().unwrap_or(""), &found, suggested, conf)? {
+                Choice::Pick(i) => full_record(meta, kind, &found[i]),
+                Choice::Skip | Choice::Quit => bail!("nothing chosen"),
+            }
+        };
+        apply_identify(client, meta, kind, slug, &found, yes, dry_run)?;
+        return Ok(());
+    }
+    // Walk the cover-less entries from the public index (rows: kind, slug, title, status, rating, year, cover, date, updated, creator).
+    let index: serde_json::Value = client.http.get(format!("{}/index.json", client.url)).send()?.error_for_status()?.json()?;
+    let items = index["items"].as_array().context("unexpected /index.json shape")?;
+    let (mut seen, mut applied) = (0, 0);
+    for it in items {
+        let (Some(k), Some(slug), Some(title)) = (it[0].as_str().and_then(|k| parse::<Kind>(k).ok()), it[1].as_str(), it[2].as_str()) else { continue };
+        if it[6].as_str().is_some_and(|c| !c.is_empty()) || kind.is_some_and(|f| f != k) {
+            continue;
+        }
+        if limit.is_some_and(|l| seen >= l) {
+            break;
+        }
+        seen += 1;
+        let year = it[5].as_i64().map(|y| y as i32);
+        let creator = it[9].as_str().unwrap_or("");
+        let found = match meta.search(k, title) {
+            Ok(f) => released_by(f, it[7].as_str()),
+            Err(e) => {
+                println!("\n{title}: search failed: {e:#}");
+                continue;
+            }
+        };
+        let (suggested, conf) = matching::pick(title, year, Some(creator).filter(|c| !c.is_empty()), &found);
+        match ask(title, year, creator, &found, suggested, conf)? {
+            Choice::Pick(i) => {
+                let c = full_record(meta, k, &found[i]);
+                match apply_identify(client, meta, k, slug, &c, yes, dry_run) {
+                    Ok(true) => applied += 1,
+                    Ok(false) => {}
+                    Err(e) => println!("  failed: {e:#}"),
+                }
+            }
+            Choice::Skip => {}
+            Choice::Quit => break,
+        }
+    }
+    println!("\nlooked at {seen} cover-less entries, applied {applied}");
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
@@ -911,6 +1074,10 @@ fn main() -> Result<()> {
                 find_covers(&Client::new(&cli)?, &Meta::new(&cli)?, kind, *dry_run, *accept_check, *limit, *ids_only)?
             }
         }
+        Cmd::Identify { kind, slug, external_id, query, yes, dry_run, limit } => {
+            let kind = kind.as_deref().map(parse::<Kind>).transpose()?;
+            identify(&Client::new(&cli)?, &Meta::new(&cli)?, kind, slug.as_deref(), external_id.as_deref(), query.as_deref(), *yes, *dry_run, *limit)?
+        }
         Cmd::Match { input, output, interactive } => match_csv(&Meta::new(&cli)?, input, output, *interactive)?,
         Cmd::Import { file, dry_run, skip_existing, no_cover } => {
             let mut rdr = csv::Reader::from_path(file)?;
@@ -963,4 +1130,34 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry() -> Entry {
+        serde_json::from_value(serde_json::json!({
+            "id": 1, "kind": "movie", "slug": "birdman", "title": "birdman", "status": "consumed", "rating": 8, "review": "x",
+            "year": 2015, "source": "tmdb", "external_id": "435092", "creator": "Wrong", "cover_key": null, "consumed_at": "2015-03-01"
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn diff_lists_only_what_changes() {
+        let c = Candidate { id: "194662".into(), title: "Birdman".into(), year: Some(2014), creator: Some("Alejandro G. Iñárritu".into()), cover_url: Some("https://x/y.jpg".into()), ..Default::default() };
+        let d = identify_diff(&entry(), &c).join("\n");
+        assert!(d.contains("birdman  ->  Birdman"), "{d}");
+        assert!(d.contains("2015  ->  2014"), "{d}");
+        assert!(d.contains("Wrong  ->  Alejandro"), "{d}");
+        assert!(d.contains("435092  ->  194662"), "{d}");
+        assert!(d.contains("-  ->  provider's"), "{d}");
+    }
+
+    #[test]
+    fn diff_keeps_year_creator_and_cover_when_the_provider_lacks_them() {
+        let c = Candidate { id: "435092".into(), title: "birdman".into(), ..Default::default() };
+        assert!(identify_diff(&entry(), &c).is_empty());
+    }
 }
