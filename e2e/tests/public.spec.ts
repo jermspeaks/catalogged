@@ -114,3 +114,25 @@ test('search matches the creator as well as the title, and the detail page shows
   await page.goto(`/entry/book/${slug}`);
   await expect(page.locator('body')).toContainText('Octavia Butler');
 });
+
+test('default order is date logged, newest first, undated last (grid and no-JS list)', async ({ page, browser, request }) => {
+  await seed(request, { kind: 'book', title: 'zzlog Old', consumed_at: '2019-05-01' });
+  await seed(request, { kind: 'book', title: 'zzlog New', consumed_at: '2024-02-10' });
+  await seed(request, { kind: 'book', title: 'zzlog Undated' });
+  await seed(request, { kind: 'book', title: 'zzlog Mid', consumed_at: '2021-07-04' });
+  const order = ['New', 'Mid', 'Old', 'Undated'];
+
+  await page.goto('/?q=zzlog');
+  await expect(page.locator('select[name=sort]')).toHaveValue('logged');
+  expect((await titles(page)).map((t) => t.split(' ')[1])).toEqual(order);
+  expect(new URL(page.url()).searchParams.has('sort')).toBe(false); // default is not put in the URL
+
+  const ctx = await browser.newContext({ javaScriptEnabled: false });
+  const p = await ctx.newPage();
+  await p.goto('/');
+  const html = await p.content();
+  const pos = order.map((n) => html.indexOf(`zzlog ${n}`));
+  expect(pos.every((i) => i >= 0)).toBe(true);
+  expect([...pos].sort((a, b) => a - b)).toEqual(pos);
+  await ctx.close();
+});

@@ -81,6 +81,9 @@ _Last reviewed: 2026-11-23, after PR #16._
 - 2010 to 2016 of the owner's log are imported (755 entries by 2026-11-23): sheets from `scripts/log2csv.py`, ids from `match -i`, then `import` with a backup and a 10-row trial each time. The generator handles month headings with and without the year and markdown escapes.
 - Admin list filter: `/admin?missing=id|cover|any` (a dropdown beside the title filter) lists entries without a provider id and/or a cover; each row also shows "no id" and "no cover".
 
+### Default sort is date logged
+- The public grid, the server-rendered first page and `/index.json` now default to date logged, newest first, undated entries last, ties by last update. "Recently updated" is still a sort option; the admin list stays by last update. Migration `0004` adds indexes on `(consumed_at DESC, updated_at DESC)` (and by kind) so a page reads about 60 rows.
+
 ## Discovery items done (triaged 2026-11-23)
 
 - Seed the initial database (2010 imported; later years in plan.md).
