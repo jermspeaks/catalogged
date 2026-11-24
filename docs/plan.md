@@ -43,10 +43,13 @@ All of the owner's log (2010 to 2026) is imported: 1,876 entries on 2026-11-23 (
 ### P3. Warn before adding a duplicate (S)
 The database already rejects duplicates (409). In the admin search results, mark titles already in the catalogue ("in catalogue", linking to its edit page) and disable Add, instead of failing after the click. Needs the existing list (`/index.json`) loaded on the admin page.
 
-### P4. Public site (M, as wanted)
+### P4. Track TV shows by season (M)
+From the owner's discovery notes (2026-11-23): a series can be watched over years, so a show should record each season with its own date. Today a show is one entry with one `consumed_at`, and the log's season text sits in `review` ("Season 4"). Needs a design first: probably a small `seasons` table (entry id, season label, date) or a JSON column on the entry, shown on the detail page, with the entry's own date following the latest season; a migration, the admin edit form and `/index.json` (keep it small) are affected. Also settle how `import` treats a repeated show (today `--skip-existing` drops the later season). Ask the owner before building.
+
+### P5. Public site (M, as wanted)
 Per-kind and per-status counts; richer detail pages (year, source link, provider overview); lazy cover sizing; show the creator on grid cards. Optional until the catalogue is populated, since the grid is the main surface.
 
-### P5. Housekeeping (S each)
+### P6. Housekeeping (S each)
 - GitHub Action running the e2e suite on pull requests (none exists; run `npm test` in `e2e/` before merging Worker or UI changes today).
 - PNG and apple-touch icons (the favicon and manifest use an SVG only).
 - Validate provider ids on write: an Open Library id must look like `OL…W` (a work). Edition ids (`OL…M`) were saved by hand for four books and no lookup accepts them; fix those entries on their edit pages, and reject the pattern in `EditEntry::validate_for`.
