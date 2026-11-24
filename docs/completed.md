@@ -78,7 +78,7 @@ _Last reviewed: 2026-11-23, after PR #16._
 - On the real 2010 sheet: 49 sure matches, 19 to check and 7 with no match, out of 75 (before: 41, 18 and 16).
 
 ### Log imports
-- 2010 to 2016 of the owner's log are imported (755 entries by 2026-11-23): sheets from `scripts/log2csv.py`, ids from `match -i`, then `import` with a backup and a 10-row trial each time. The generator handles month headings with and without the year and markdown escapes.
+- 2010 to 2019 of the owner's log are imported (1,089 entries by 2026-11-23): sheets from `scripts/log2csv.py`, ids from `match -i`, then `import` with a backup and a 10-row trial each time. The generator handles month headings with and without the year, markdown escapes, parenthesised links, the 2019 "Febrary" typo, and (from 2020) emoji-less lines, season text on shows, and trailing `🔁` / `Letterboxd` marks. Titles already in the catalogue are skipped (one entry per work, so re-watches keep their first date).
 - Admin list filter: `/admin?missing=id|cover|any` (a dropdown beside the title filter) lists entries without a provider id and/or a cover; each row also shows "no id" and "no cover".
 
 ### Identify (edit page)
