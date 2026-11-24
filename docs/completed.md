@@ -87,6 +87,9 @@ _Last reviewed: 2026-11-23, after PR #16._
 ### Default sort is date logged
 - The public grid, the server-rendered first page and `/index.json` now default to date logged, newest first, undated entries last, ties by last update. "Recently updated" is still a sort option; the admin list stays by last update. Migration `0004` adds indexes on `(consumed_at DESC, updated_at DESC)` (and by kind) so a page reads about 60 rows.
 
+### Public card and detail polish
+- Cards (grid, no-JS list) and detail pages no longer print "consumed" (it is assumed; `wanted` and `in progress` still show), show the rating as a face instead of `n/10` (1-2 😖, 3-4 🙁, 5-6 😐, 7-8 🙂, 9-10 😍; hover for the number; the stored rating is still 1 to 10) and show when it was logged as month and year (`Mar 2015`, because the log never tracked the day before 2016). One helper (`public_ui::meta_line`) renders the line; the grid script mirrors it.
+
 ## Discovery items done (triaged 2026-11-23)
 
 - Seed the initial database (2010 imported; later years in plan.md).

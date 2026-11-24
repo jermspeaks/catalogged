@@ -65,6 +65,9 @@ pub const GRID_JS: &str = r#"
 const $=s=>document.querySelector(s);
 const grid=$('#grid'); if(!grid) return;
 const STEP=60;
+// Keep in step with rating_emoji() and month_year() below in this file's Rust helpers.
+const emoji=n=>['😖','🙁','😐','🙂','😍'][Math.min(4,Math.max(0,Math.ceil(n/2)-1))];
+const month=d=>{const m=+d.slice(5,7); return (m>=1&&m<=12?['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1]+' ':'')+d.slice(0,4)};
 const sorts={
  recent:(a,b)=>b.upd.localeCompare(a.upd),
  logged:(a,b)=>(b.date||'').localeCompare(a.date||'')||b.upd.localeCompare(a.upd),
@@ -93,7 +96,9 @@ fetch('/index.json').then(r=>r.ok?r.json():Promise.reject(r.status)).then(d=>{
    else{img=document.createElement('div');img.className='ph'}
    const t2=document.createElement('div'); t2.textContent=e.title+(e.year?' ('+e.year+')':'');
    a.append(img,t2);
-   const s=document.createElement('small'); s.textContent=e.kind+' · '+e.status.replace('_',' ')+(e.rating?' · '+e.rating+'/10':'');
+   const s=document.createElement('small'); s.append(e.kind+(e.status!=='consumed'?' · '+e.status.replace('_',' '):''));
+   if(e.rating){const r=document.createElement('span'); r.textContent=emoji(e.rating); r.title=e.rating+'/10'; r.setAttribute('role','img'); r.setAttribute('aria-label',e.rating+' out of 10'); s.append(' · ',r)}
+   if(e.date) s.append(' · '+month(e.date));
    li.append(a,s); return li}));
   more.hidden=list.length<=shown;
  }
@@ -130,3 +135,48 @@ pub const MANIFEST: &str = r##"{"name":"catalogged","short_name":"catalogged","s
 
 /// Head links for the favicon and web manifest (routes in lib.rs).
 pub const FAVICON_LINKS: &str = r##"<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#4c1036">"##;
+
+/// The 1 to 10 rating as a face (two ratings per face). Mirrors `emoji` in the grid script.
+pub fn rating_emoji(r: u8) -> &'static str {
+    ["😖", "🙁", "😐", "🙂", "😍"][usize::from(r.clamp(1, 10).div_ceil(2) - 1)]
+}
+
+/// `2015-03-19` as `Mar 2015`. The log never tracked the day before 2016, so only month and year are shown.
+/// Anything that is not a `YYYY-MM-..` date is returned unchanged.
+pub fn month_year(date: &str) -> String {
+    const M: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    match (date.get(0..4), date.get(5..7).and_then(|m| m.parse::<usize>().ok())) {
+        (Some(y), Some(m)) if (1..=12).contains(&m) => format!("{} {y}", M[m - 1]),
+        _ => date.to_string(),
+    }
+}
+
+/// The small line under a card or on a detail page: kind, a status label unless it is the assumed
+/// `consumed`, the rating as a face, and when it was logged.
+pub fn meta_line(kind: &str, status: &str, rating: Option<u8>, consumed_at: Option<&str>) -> maud::Markup {
+    maud::html! {
+        (kind)
+        @if status != "consumed" { " · " (status.replace('_', " ")) }
+        @if let Some(r) = rating { " · " span role="img" title={(r) "/10"} aria-label={(r) " out of 10"} { (rating_emoji(r)) } }
+        @if let Some(d) = consumed_at.filter(|d| !d.is_empty()) { " · " (month_year(d)) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn faces_cover_the_whole_scale() {
+        let faces: Vec<_> = (1..=10).map(rating_emoji).collect();
+        assert_eq!(faces, ["😖", "😖", "🙁", "🙁", "😐", "😐", "🙂", "🙂", "😍", "😍"]);
+    }
+
+    #[test]
+    fn dates_show_month_and_year() {
+        assert_eq!(month_year("2015-03-19"), "Mar 2015");
+        assert_eq!(month_year("2024-12-01"), "Dec 2024");
+        assert_eq!(month_year("2020"), "2020");
+        assert_eq!(month_year("2020-13-01"), "2020-13-01");
+    }
+}

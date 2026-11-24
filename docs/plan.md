@@ -1,6 +1,6 @@
 # Plan
 
-What is built lives in [completed.md](completed.md). This file is what remains, in priority order, plus the decisions that shape it. The free-tier rules in [free-tier.md](free-tier.md) apply to every item. Last reviewed: 2026-11-23, after the 2010 to 2016 imports.
+What is built lives in [completed.md](completed.md). This file is what remains, in priority order, plus the decisions that shape it. The free-tier rules in [free-tier.md](free-tier.md) apply to every item. Last reviewed: 2026-11-23, after the 2010 to 2016 imports, default sort, Identify and the card polish.
 
 ## Goals
 
@@ -39,11 +39,8 @@ Ordered by value for the owner's actual goal (a complete, good-looking catalogue
 - Check the 10-row trial for hand-picked mismatches: a wrong pick during `match -i` (for example a 2015 short instead of the 2014 *Birdman*) imports quietly. The CSV `creator` column is copied onto the entry, so correct it in the sheet too.
 - Known loose ends from 2010 to 2016 (edit page): entries with no provider id or cover (use the new "missing" filter in `/admin`), four books saved with Open Library edition ids (`OL…M`, which no lookup accepts), nine entries with an id but no year, and six with no creator. Covers whose posters are WebP failed to decode in the CLI (see P6).
 
-### P2. Public card and detail polish (S)
-From the owner's discovery notes (2026-11-23). The status enum is `wanted | in_progress | consumed` (CHECK constraint in `migrations/0001`).
-- Stop printing "consumed" on cards and detail pages (it is assumed); only `wanted` and `in progress` need a label. Other states may get their own pages later.
-- Show the date logged (`consumed_at`) on cards and the detail page.
-- Show ratings as emojis (a few steps, like the reference site) instead of `n/10`. Needs the scale chosen with the owner; the stored rating stays 1 to 10.
+### P2. Identify by provider id on the edit page (S)
+From the owner's discovery notes (2026-11-23): the edit page's Identify box should also take a provider id (TMDB id, an IMDb `tt…` id, an Open Library work id or an IGDB id) and fetch that record directly, the way the CLI's `identify --external-id` does. The Worker already has `/admin/api/lookup?kind=&id=`; the box would call it when the text looks like an id, and the result goes through the same apply step.
 
 ### P3. Measure at scale (S, after a big import)
 Nothing has been measured above 79 entries. Before approaching 5,000: size and CPU time of `/index.json` (it now carries the creator too), D1 rows read per day, R2 operations (see the monitoring checklist in [operations.md](operations.md)). If `/index.json` is too heavy, options are trimming fields, paging it, or FTS5 on D1 (unverified).

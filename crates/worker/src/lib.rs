@@ -354,7 +354,7 @@ async fn home(State(state): State<AppState>, Query(lq): Query<ListQuery>) -> Axu
                             @if let Some(key) = &e.cover_key { img src=(cover_src(&state.env, key)) alt="" loading="lazy" width="300" height="450"; } @else { div.ph {} }
                             div { (e.title) @if let Some(y) = e.year { " (" (y) ")" } }
                         }
-                        small { (e.kind.as_str()) " · " (e.status.as_str()) @if let Some(r) = e.rating { " · " (r) "/10" } }
+                        small { (public_ui::meta_line(e.kind.as_str(), e.status.as_str(), e.rating, e.consumed_at.as_deref())) }
                     }
                 }
             }
@@ -385,11 +385,7 @@ async fn entry_page(State(state): State<AppState>, Path((kind, slug)): Path<(Str
             @if let Some(c) = &e.creator { p { (c) } }
             p { small { a href={"/admin/edit/" (e.kind.as_str()) "/" (e.slug)} { "Edit" } } }
             @if let Some(key) = &e.cover_key { img.cover src=(cover_src(&e_env, key)) alt="" width="300" height="450"; } @else { div.cover.ph {} }
-            p {
-                (e.kind.as_str()) " · " (e.status.as_str())
-                @if let Some(r) = e.rating { " · " (r) "/10" }
-                @if let Some(d) = &e.consumed_at { " · " (d) }
-            }
+            p { (public_ui::meta_line(e.kind.as_str(), e.status.as_str(), e.rating, e.consumed_at.as_deref())) }
             @if let Some(review) = &e.review {
                 @for para in review.split("\n\n") { p { (para) } }
             }
