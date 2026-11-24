@@ -67,7 +67,7 @@ const grid=$('#grid'); if(!grid) return;
 const STEP=60;
 const sorts={
  recent:(a,b)=>b.upd.localeCompare(a.upd),
- logged:(a,b)=>(b.date||'').localeCompare(a.date||''),
+ logged:(a,b)=>(b.date||'').localeCompare(a.date||'')||b.upd.localeCompare(a.upd),
  title:(a,b)=>a.title.localeCompare(b.title),
  year:(a,b)=>(b.year||0)-(a.year||0),
  rating:(a,b)=>(b.rating||0)-(a.rating||0)};
@@ -75,7 +75,7 @@ fetch('/index.json').then(r=>r.ok?r.json():Promise.reject(r.status)).then(d=>{
  const items=d.items.map(a=>({kind:a[0],slug:a[1],title:a[2],status:a[3],rating:a[4],year:a[5],cover:a[6],date:a[7],upd:a[8],lc:(a[2]+' '+(a[9]||'')).toLowerCase()}));
  const f=$('#controls'), q=f.q, kind=f.kind, status=f.status, sort=f.sort;
  const p=new URLSearchParams(location.search);
- q.value=p.get('q')||''; kind.value=p.get('kind')||''; status.value=p.get('status')||''; sort.value=sorts[p.get('sort')]?p.get('sort'):'recent';
+ q.value=p.get('q')||''; kind.value=p.get('kind')||''; status.value=p.get('status')||''; sort.value=sorts[p.get('sort')]?p.get('sort'):'logged';
  f.hidden=false; for(const id of ['#nav','#pager']){const n=$(id); if(n) n.hidden=true}
  let shown=STEP;
  const more=document.createElement('button'); more.className='more'; more.type='button'; more.textContent='Show more';
@@ -83,7 +83,7 @@ fetch('/index.json').then(r=>r.ok?r.json():Promise.reject(r.status)).then(d=>{
  function draw(){
   const t=q.value.trim().toLowerCase();
   const list=items.filter(e=>(!kind.value||e.kind===kind.value)&&(!status.value||e.status===status.value)&&(!t||e.lc.includes(t))).sort(sorts[sort.value]);
-  const u=new URLSearchParams(); if(t)u.set('q',q.value.trim()); if(kind.value)u.set('kind',kind.value); if(status.value)u.set('status',status.value); if(sort.value!=='recent')u.set('sort',sort.value);
+  const u=new URLSearchParams(); if(t)u.set('q',q.value.trim()); if(kind.value)u.set('kind',kind.value); if(status.value)u.set('status',status.value); if(sort.value!=='logged')u.set('sort',sort.value);
   history.replaceState(null,'',u.toString()?'?'+u:location.pathname);
   $('#count').textContent=list.length+(list.length===1?' entry':' entries');
   grid.replaceChildren(...list.slice(0,shown).map(e=>{

@@ -45,25 +45,22 @@ New idea from the owner (2026-11-23): replace the cover finder with an **identif
 - CLI: `catalogged covers` grows into (or is joined by) `identify`, which also corrects titles from the provider's spelling. Needs a decision on whether the provider's title should overwrite a hand-typed one (the slug never changes either way).
 - Pairs with P1: after each import the leftovers are the rows that did not match, and this is the fast way to fix them by hand.
 
-### P3. Default public sort is date logged (S)
-New idea from the owner (2026-11-23). The grid defaults to "recent" (last updated). Make "date logged" the default: the sort control, the order of `/index.json` (it is `updated_at DESC` today), and the server-rendered first page. Entries without a date sort last.
-
-### P4. Public card and detail polish (S)
+### P3. Public card and detail polish (S)
 From the owner's discovery notes (2026-11-23). The status enum is `wanted | in_progress | consumed` (CHECK constraint in `migrations/0001`).
 - Stop printing "consumed" on cards and detail pages (it is assumed); only `wanted` and `in progress` need a label. Other states may get their own pages later.
 - Show the date logged (`consumed_at`) on cards and the detail page.
 - Show ratings as emojis (a few steps, like the reference site) instead of `n/10`. Needs the scale chosen with the owner; the stored rating stays 1 to 10.
 
-### P5. Measure at scale (S, after a big import)
+### P4. Measure at scale (S, after a big import)
 Nothing has been measured above 79 entries. Before approaching 5,000: size and CPU time of `/index.json` (it now carries the creator too), D1 rows read per day, R2 operations (see the monitoring checklist in [operations.md](operations.md)). If `/index.json` is too heavy, options are trimming fields, paging it, or FTS5 on D1 (unverified).
 
-### P6. Warn before adding a duplicate (S)
+### P5. Warn before adding a duplicate (S)
 The database already rejects duplicates (409). In the admin search results, mark titles already in the catalogue ("in catalogue", linking to its edit page) and disable Add, instead of failing after the click. Needs the existing list (`/index.json`) loaded on the admin page.
 
-### P7. Public site (M, as wanted)
+### P6. Public site (M, as wanted)
 Per-kind and per-status counts; richer detail pages (year, source link, provider overview); lazy cover sizing; show the creator on grid cards. Optional until the catalogue is populated, since the grid is the main surface.
 
-### P8. Housekeeping (S each)
+### P7. Housekeeping (S each)
 - GitHub Action running the e2e suite on pull requests (none exists; run `npm test` in `e2e/` before merging Worker or UI changes today).
 - PNG and apple-touch icons (the favicon and manifest use an SVG only).
 - Validate provider ids on write: an Open Library id must look like `OL…W` (a work). Edition ids (`OL…M`) were saved by hand for four books and no lookup accepts them; fix those entries on their edit pages, and reject the pattern in `EditEntry::validate_for`.
