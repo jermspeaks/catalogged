@@ -112,6 +112,44 @@ test('add by id (provider mocked): uses the kind the lookup returns', async ({ p
   expect((await entry(request, 'show', 'e2e-lookup-show')).body).toMatchObject({ source: 'tmdb', external_id: '1396', creator: 'Vince Gilligan' }); // the provider's creator is stored
 });
 
+test('search marks results already in the catalogue and links to them instead of offering Add (provider mocked)', async ({ page, request }) => {
+  const slug = await seed(request, { kind: 'movie', title: 'E2E Owned Film', source: 'tmdb', external_id: '88001' });
+  await page.route('**/admin/api/search*', (r) => r.fulfill({ json: [
+    { id: '88001', title: 'E2E Owned Film', year: 2001, cover_url: null, thumb_url: null, overview: null },
+    { id: '88002', title: 'E2E Fresh Film', year: 2002, cover_url: null, thumb_url: null, overview: null },
+  ] }));
+  await page.goto('/admin');
+  await page.selectOption('#kind', 'movie');
+  await page.fill('#q', 'e2e film');
+  await page.getByRole('button', { name: 'Search' }).click();
+  const owned = page.locator('#results li', { hasText: 'E2E Owned Film' });
+  await expect(owned.getByRole('link', { name: 'in catalogue' })).toHaveAttribute('href', `/admin/edit/movie/${slug}`);
+  await expect(owned.getByRole('button')).toHaveCount(0);
+  await expect(page.locator('#results li', { hasText: 'E2E Fresh Film' }).getByRole('button', { name: 'Add' })).toBeVisible();
+});
+
+test('add by id of something already in the catalogue says so and does not add (provider mocked)', async ({ page, request }) => {
+  const slug = await seed(request, { kind: 'show', title: 'E2E Owned Show', source: 'tmdb', external_id: '88003' });
+  await page.route('**/admin/api/lookup*', (r) =>
+    r.fulfill({ json: { kind: 'show', id: '88003', title: 'E2E Owned Show Renamed', year: 2008, cover_url: null, thumb_url: null, overview: null, creator: null } }));
+  await page.goto('/admin');
+  await page.locator('summary', { hasText: 'Add by id' }).click();
+  await page.selectOption('#idkind', 'show');
+  await page.fill('#extid', '88003');
+  await page.getByRole('button', { name: 'Look up and add' }).click();
+  await expect(page.locator('#msg')).toContainText('already in the catalogue');
+  await expect(page.locator('#msg a')).toHaveAttribute('href', `/admin/edit/show/${slug}`);
+  expect((await entry(request, 'show', 'e2e-owned-show-renamed')).status).toBe(404);
+});
+
+test('owned endpoint: finds ids per kind, ignores other kinds and blanks', async ({ request }) => {
+  await seed(request, { kind: 'book', title: 'E2E Owned Book', source: 'open_library', external_id: 'OL88004W' });
+  const r = await request.get('/admin/api/owned?kind=book&ids=OL88004W,OL1W,,');
+  expect(await r.json()).toEqual({ OL88004W: 'e2e-owned-book' });
+  expect(await (await request.get('/admin/api/owned?kind=movie&ids=OL88004W')).json()).toEqual({});
+  expect(await (await request.get('/admin/api/owned?kind=movie&ids=')).json()).toEqual({});
+});
+
 test('adding a duplicate reports the error', async ({ page, request }) => {
   await seed(request, { kind: 'movie', title: 'E2E Already There' });
   await page.goto('/admin');

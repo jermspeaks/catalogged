@@ -40,9 +40,6 @@ All of the owner's log (2010 to 2026) is imported: 1,876 entries on 2026-11-23 (
 ### P2. Measure at scale (S, after a big import)
 Nothing has been measured above 79 entries. Before approaching 5,000: size and CPU time of `/index.json` (it now carries the creator too), D1 rows read per day, R2 operations (see the monitoring checklist in [operations.md](operations.md)). If `/index.json` is too heavy, options are trimming fields, paging it, or FTS5 on D1 (unverified).
 
-### P3. Warn before adding a duplicate (S)
-The database already rejects duplicates (409). In the admin search results, mark titles already in the catalogue ("in catalogue", linking to its edit page) and disable Add, instead of failing after the click. Needs the existing list (`/index.json`) loaded on the admin page.
-
 ### P4. Public site (M, as wanted)
 Per-kind and per-status counts; richer detail pages (year, source link, provider overview); lazy cover sizing; show the creator on grid cards. Optional until the catalogue is populated, since the grid is the main surface.
 
