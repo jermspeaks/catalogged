@@ -40,6 +40,8 @@ All of the owner's log (2010 to 2026) is imported: 1,876 entries on 2026-11-23 (
 ### P2. Measure at scale: done (2026-11-23, 1,949 entries); re-check near 5,000
 `/index.json` is 326 KB raw and 94 KB brotli on the wire (about 167 bytes per entry, so about 840 KB raw and 240 KB compressed at 5,000). Rebuilding it is one D1 query: 1,949 rows read, 31 ms in D1; the whole request took 0.17 s from the owner's machine. At most one rebuild per edge location per 15 minutes (plus one after each admin write): about 190k rows a day per busy location now, about 480k at 5,000 entries, against 5M a day, so roughly ten locations could rebuild all day and stay under. The Worker only wraps the string SQLite builds, so CPU should be a few ms; not measured directly (check "CPU time p99" in the dashboard after a few days of traffic). No change needed; if it ever is, trim fields, page it or add FTS5. Public list pages still read about 60 rows each.
 
+### P4. Public site (M, as wanted)
+
 ### P3. Warn before adding a duplicate (S)
 The database already rejects duplicates (409). In the admin search results, mark titles already in the catalogue ("in catalogue", linking to its edit page) and disable Add, instead of failing after the click. Needs the existing list (`/index.json`) loaded on the admin page.
 

@@ -93,6 +93,9 @@ _Last reviewed: 2026-11-23, after PR #16._
 ### Public lists by status
 - The public site has three lists, linked in a top navigation: **Consumed** (`/`, the default), **In progress** (`/in-progress`) and **Wanted** (`/wanted`). There is no all-at-once view and no status filter; each page has search, kind and sort. Cards no longer name a status (the tab does); detail pages still do and link back to their list. Each list is cached like the home page and cleared on admin writes (kind variants of the two new lists lag up to the 5 minute TTL).
 
+### Duplicate warning in admin search
+- Search results already in the catalogue show an "in catalogue" link to their edit page instead of Add; Add by id says so and stops. `GET /admin/api/owned?kind=&ids=` checks the ids against D1's unique `(kind, source, external_id)` index (one indexed lookup per id, at most 25). The database still rejects duplicates (409) if the check fails. Matching is by provider id, so a remake with its own id is never marked.
+
 ## Discovery items done (triaged 2026-11-23)
 
 - Seed the initial database (2010 imported; later years in plan.md).
@@ -104,7 +107,7 @@ _Last reviewed: 2026-11-23, after PR #16._
 - Bulk cover finder (`catalogged covers`).
 - Placeholder image; form feedback on the edit page; edit form grid layout; auto-fill the provider id when picking a cover (edit page polish).
 - Colour palette: now only in the CSS (`crates/worker/src/public_ui.rs`); removed from discovery.md.
-- Duplicates are rejected: the database enforces one entry per slug and per provider id, and the admin shows the 409. (A warning *before* adding is still open in plan.md.)
+- Duplicates are rejected: the database enforces one entry per slug and per provider id, and the admin shows the 409. (The warning before adding is done too.)
 
 ## Known gaps in what is "done"
 

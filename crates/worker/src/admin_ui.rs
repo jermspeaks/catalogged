@@ -72,6 +72,7 @@ async function doSearch() {
   if (!r.ok) { msg(`Search failed: ${r.status} ${await r.text()}`); return; }
   const items = await r.json();
   msg(items.length ? '' : 'No results.');
+  const have = await owned(kind, items.map((c) => c.id));
   const ul = $('#results'); ul.replaceChildren();
   for (const c of items) {
     const li = document.createElement('li');
@@ -82,12 +83,27 @@ async function doSearch() {
     }
     const label = document.createElement('span');
     label.textContent = ` ${c.title}${c.year ? ` (${c.year})` : ''}${c.creator ? ` · ${c.creator}` : ''} `;
-    const btn = document.createElement('button');
-    btn.textContent = 'Add';
-    btn.onclick = () => add(kind, c, btn);
-    li.append(label, btn);
+    if (have[c.id]) {
+      const a = document.createElement('a');
+      a.href = `/admin/edit/${kind}/${have[c.id]}`; a.textContent = 'in catalogue';
+      li.append(label, a);
+    } else {
+      const btn = document.createElement('button');
+      btn.textContent = 'Add';
+      btn.onclick = () => add(kind, c, btn);
+      li.append(label, btn);
+    }
     ul.append(li);
   }
+}
+
+// Ids already in the catalogue, as { id: slug }. A failed check just means no marks (the database still rejects duplicates).
+async function owned(kind, ids) {
+  if (!ids.length) return {};
+  try {
+    const r = await fetch(`/admin/api/owned?kind=${kind}&ids=${encodeURIComponent(ids.join(','))}`);
+    return r.ok ? await r.json() : {};
+  } catch { return {}; }
 }
 
 function defaults() {
@@ -126,6 +142,8 @@ $('#byid').addEventListener('submit', async (ev) => {
   const r = await fetch(`/admin/api/lookup?kind=${kind}&id=${encodeURIComponent(id)}`);
   if (!r.ok) { msg(`Lookup failed: ${r.status} ${(await r.text()).slice(0, 160)}`); return; }
   const c = await r.json();
+  const slug = (await owned(c.kind, [c.id]))[c.id];
+  if (slug) { msg(`"${c.title}" is already in the catalogue: `, 'err'); $('#msg').append(Object.assign(document.createElement('a'), { href: `/admin/edit/${c.kind}/${slug}`, textContent: 'open it' })); return; }
   await add(c.kind, c, null);
 });
 

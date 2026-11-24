@@ -61,6 +61,7 @@ fn router(env: Env) -> Router {
         .route("/admin/edit/{kind}/{slug}", get(admin_edit_page))
         .route("/admin/api/search", get(search))
         .route("/admin/api/lookup", get(lookup))
+        .route("/admin/api/owned", get(owned))
         .route("/admin/api/image", get(proxy_image))
         .route("/admin/api/entries", post(create_entry))
         .route(
@@ -579,6 +580,46 @@ async fn delete_entry(
         purge.push(format!("/covers/{key}"));
     }
     Ok((StatusCode::NO_CONTENT, purge_headers(&purge)).into_response())
+}
+
+#[derive(Deserialize)]
+struct OwnedQuery {
+    kind: Kind,
+    /// Comma-separated provider ids (a search's results).
+    ids: String,
+}
+
+/// Which of these provider ids are already in the catalogue: `{"<id>": "<slug>"}`. The admin search marks
+/// those results instead of letting Add fail with a 409. One indexed lookup per id on the unique
+/// `(kind, source, external_id)` index, so a search reads about as many rows as it has results.
+#[worker::send]
+async fn owned(State(state): State<AppState>, Query(q): Query<OwnedQuery>) -> Result<Json<std::collections::HashMap<String, String>>, ApiErr> {
+    admin_guard(&state.env)?;
+    let ids: Vec<&str> = q.ids.split(',').map(str::trim).filter(|i| !i.is_empty() && i.len() <= 64).take(25).collect();
+    if ids.is_empty() {
+        return Ok(Json(Default::default()));
+    }
+    let marks = (0..ids.len()).map(|i| format!("?{}", i + 3)).collect::<Vec<_>>().join(",");
+    let mut params: Vec<JsValue> = vec![q.kind.as_str().into(), catalogged_core::Source::for_kind(q.kind).as_str().into()];
+    params.extend(ids.iter().map(|i| JsValue::from_str(i)));
+    #[derive(Deserialize)]
+    struct Row {
+        external_id: String,
+        slug: String,
+    }
+    let rows = state
+        .env
+        .d1("DB")
+        .map_err(internal)?
+        .prepare(format!("SELECT external_id, slug FROM entries WHERE kind = ?1 AND source = ?2 AND external_id IN ({marks})"))
+        .bind(&params)
+        .map_err(internal)?
+        .all()
+        .await
+        .map_err(internal)?
+        .results::<Row>()
+        .map_err(internal)?;
+    Ok(Json(rows.into_iter().map(|r| (r.external_id, r.slug)).collect()))
 }
 
 #[derive(Deserialize)]
