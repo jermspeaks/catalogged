@@ -122,7 +122,7 @@ pub struct NewEntry {
 
 /// A search hit or fetched item, normalized across providers. `cover_url` is a full-size image
 /// to convert to WebP; `thumb_url` is a small one for result lists.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Candidate {
     pub id: String,
     pub title: String,

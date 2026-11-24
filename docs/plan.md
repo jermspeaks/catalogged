@@ -37,27 +37,24 @@ Ordered by value for the owner's actual goal (a complete, good-looking catalogue
 - Generator: `scripts/log2csv.py <log.md> <year> <out.csv>` (sheets go to `seeds/`, gitignored because they are personal data). It reads the 2010 to 2016 formats (month headings with or without the year) and understands TMDB links, Letterboxd links, `🔁`, `🎮` and `📺` lines; 2017 onwards has not been run through it yet, so check each year's output (row count against the list lines, format surprises) before matching. Books get a `creator` from `by Author`.
 - Per year: generate, `match --interactive` (sure matches are filled in without asking), `import --dry-run`, `scripts/backup.sh`, 10 rows for real and a check in D1, then the rest with `--skip-existing`. Mind the D1 write budget: 5,000 entries is about half of one day's writes; a year or two per run is fine.
 - Check the 10-row trial for hand-picked mismatches: a wrong pick during `match -i` (for example a 2015 short instead of the 2014 *Birdman*) imports quietly. The CSV `creator` column is copied onto the entry, so correct it in the sheet too.
-- Known loose ends from 2010 to 2016 (edit page): entries with no provider id or cover (use the new "missing" filter in `/admin`), four books saved with Open Library edition ids (`OL…M`, which no lookup accepts), nine entries with an id but no year, and six with no creator. Covers whose posters are WebP failed to decode in the CLI (see P7).
+- Known loose ends from 2010 to 2016 (edit page): entries with no provider id or cover (use the new "missing" filter in `/admin`), four books saved with Open Library edition ids (`OL…M`, which no lookup accepts), nine entries with an id but no year, and six with no creator. Covers whose posters are WebP failed to decode in the CLI (see P6).
 
-### P2. Identify in the CLI (S)
-The edit page now has **Identify** (see completed.md): pick a provider record and it replaces the title, year, creator, provider id and cover and saves. Still open is the CLI side: `catalogged identify --kind K --slug S [--external-id ID]` (search by the entry's title and pick, or fetch the given id) applying the same fields, and a bulk mode for the leftovers of an import. It overwrites hand-typed titles on purpose (the slug never changes), so it should show a before and after and ask unless `--yes`.
-
-### P3. Public card and detail polish (S)
+### P2. Public card and detail polish (S)
 From the owner's discovery notes (2026-11-23). The status enum is `wanted | in_progress | consumed` (CHECK constraint in `migrations/0001`).
 - Stop printing "consumed" on cards and detail pages (it is assumed); only `wanted` and `in progress` need a label. Other states may get their own pages later.
 - Show the date logged (`consumed_at`) on cards and the detail page.
 - Show ratings as emojis (a few steps, like the reference site) instead of `n/10`. Needs the scale chosen with the owner; the stored rating stays 1 to 10.
 
-### P4. Measure at scale (S, after a big import)
+### P3. Measure at scale (S, after a big import)
 Nothing has been measured above 79 entries. Before approaching 5,000: size and CPU time of `/index.json` (it now carries the creator too), D1 rows read per day, R2 operations (see the monitoring checklist in [operations.md](operations.md)). If `/index.json` is too heavy, options are trimming fields, paging it, or FTS5 on D1 (unverified).
 
-### P5. Warn before adding a duplicate (S)
+### P4. Warn before adding a duplicate (S)
 The database already rejects duplicates (409). In the admin search results, mark titles already in the catalogue ("in catalogue", linking to its edit page) and disable Add, instead of failing after the click. Needs the existing list (`/index.json`) loaded on the admin page.
 
-### P6. Public site (M, as wanted)
+### P5. Public site (M, as wanted)
 Per-kind and per-status counts; richer detail pages (year, source link, provider overview); lazy cover sizing; show the creator on grid cards. Optional until the catalogue is populated, since the grid is the main surface.
 
-### P7. Housekeeping (S each)
+### P6. Housekeeping (S each)
 - GitHub Action running the e2e suite on pull requests (none exists; run `npm test` in `e2e/` before merging Worker or UI changes today).
 - PNG and apple-touch icons (the favicon and manifest use an SVG only).
 - Validate provider ids on write: an Open Library id must look like `OL…W` (a work). Edition ids (`OL…M`) were saved by hand for four books and no lookup accepts them; fix those entries on their edit pages, and reject the pattern in `EditEntry::validate_for`.
