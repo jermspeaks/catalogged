@@ -120,3 +120,6 @@ _Last reviewed: 2026-11-23, after PR #16._
 - PNG icons (192, 512) and an apple-touch icon, embedded in the Worker and linked from the head and the manifest.
 - The CLI decodes WebP covers, so TMDB posters served as WebP (*8½*, *Alps*, *Head*, *I Knew Her Well*, *The Man From U.N.C.L.E.*) can be added; re-run `catalogged covers` or Identify for those entries.
 
+
+### Scale measurements (2026-11-23, 1,949 entries; re-check near 5,000)
+`/index.json` is 326 KB raw and 94 KB brotli on the wire (about 167 bytes per entry, so about 840 KB raw and 240 KB compressed at 5,000). Rebuilding it is one D1 query: 1,949 rows read, 31 ms in D1; the whole request took 0.17 s from the owner's machine. At most one rebuild per edge location per 15 minutes (plus one after each admin write): about 190k rows a day per busy location now, about 480k at 5,000 entries, against 5M a day, so roughly ten locations could rebuild all day and stay under. The Worker only wraps the string SQLite builds, so CPU should be a few ms; not measured directly (check "CPU time p99" in the dashboard after a few days of traffic). No change needed; if it ever is, trim fields, page it or add FTS5. Public list pages still read about 60 rows each.
