@@ -114,3 +114,9 @@ _Last reviewed: 2026-11-23, after PR #16._
 - The admin JavaScript is covered by e2e tests with providers mocked; real provider responses in the browser (TMDB / Open Library / IGDB search from `/admin`) have only been exercised by the owner.
 - The manual-cover backup path in `scripts/backup.sh` ran for real on 2026-11-23 (it copied the manually uploaded covers); restoring from it has not been tried.
 - Public pages are purged on every admin write (home, kind pages, `/index.json`, the entry page, replaced cover paths), in the data centre that handled the write; other locations expire on the normal TTL.
+
+## 2026-11-24
+
+- PNG icons (192, 512) and an apple-touch icon, embedded in the Worker and linked from the head and the manifest.
+- The CLI decodes WebP covers, so TMDB posters served as WebP (*8½*, *Alps*, *Head*, *I Knew Her Well*, *The Man From U.N.C.L.E.*) can be added; re-run `catalogged covers` or Identify for those entries.
+
