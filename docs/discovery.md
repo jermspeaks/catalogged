@@ -9,3 +9,4 @@ _None open._ (Triaged 2026-11-23: "identify" and the default sort by date logged
 - [ ] Steam library import for consumed games
 - [x] Jellyfin import watchlist
 - [ ] Other streaming services import (Netflix? Hulu? etc.)
+- [ ] Saving the publisher and finding the source website. Many times the publisher book website has a good cover image.
