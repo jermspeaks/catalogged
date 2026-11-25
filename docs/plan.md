@@ -40,7 +40,7 @@ Per-kind and per-status counts; richer detail pages (year, source link, provider
 
 ### P6. Housekeeping
 - Open Library edition ids (`OL…M`): design agreed, to build in its own session. (1) Reject `OL…M` in `EditEntry::validate_for` with a message pointing at the work id (`OL…W`). (2) Resolve an edition to its work automatically (`/books/OL…M.json` has a `works` link) when an id is typed or pasted, in the admin id fields and in the CLI. (3) For books Open Library lacks, keep Add manually and add an optional source link (`source_url`) on the entry, which also serves the "publisher site" idea in discovery.md. Fix the four existing edition-id books on their edit pages once (2) exists.
-- Steam import (discovery.md): `seeds/steam.txt` is a paste of the purchase history (date, item, acquisition method). No Steam ids or playtime. Needs decisions on status and date before building `scripts/steam2csv.py`.
+- Steam import (discovery.md): `scripts/steam2csv.py` is built (rules in its docstring). Next, owner steps: `catalogged match seeds/steam.csv seeds/steam-matched.csv -i` (57 to check, 12 none), then the usual `import --dry-run`, `scripts/backup.sh`, a 10-row trial and the rest with `--skip-existing`. Unplayed purchases import as `wanted`, which shows only on `/wanted`.
 - GitHub Action running the e2e suite on pull requests (on hold; run `npm test` in `e2e/` before merging Worker or UI changes today).
 - Admin game search in production needs the two IGDB Worker secrets: set (owner, 2026-11-24).
 - Review real free-tier numbers after a few weeks of traffic (on hold).
