@@ -47,11 +47,25 @@ async function toWebp(src) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(img.naturalWidth * scale); canvas.height = Math.round(img.naturalHeight * scale);
   canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  let native = true; // Safari and iOS cannot encode WebP from a canvas: toBlob hands back a PNG
   for (const q of [0.82, 0.7, 0.55, 0.4]) {
-    const blob = await new Promise((res) => canvas.toBlob(res, 'image/webp', q));
-    if (blob && blob.type === 'image/webp' && blob.size <= MAX) return blob;
+    const blob = native ? await new Promise((res) => canvas.toBlob(res, 'image/webp', q)) : null;
+    if (native && !(blob && blob.type === 'image/webp')) native = false;
+    const out = native ? blob : await wasmWebp(canvas, q);
+    if (out.size <= MAX) return out;
   }
   throw new Error('could not encode a WebP under the size cap');
+}
+
+// Fallback encoder: libwebp compiled to WASM, served from /admin/assets and loaded on first use.
+let wasmEncoder;
+async function wasmWebp(canvas, q) {
+  wasmEncoder ||= import('/admin/assets/webp_enc.js').then((m) => m.default({ noInitialRun: true, locateFile: (f) => `/admin/assets/${f}` }));
+  const mod = await wasmEncoder;
+  const px = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+  const out = mod.encode(px.data, px.width, px.height, { quality: q * 100, target_size: 0, target_PSNR: 0, method: 4, sns_strength: 50, filter_strength: 60, filter_sharpness: 0, filter_type: 1, partitions: 0, segments: 4, pass: 1, show_compressed: 0, preprocessing: 0, autofilter: 0, partition_limit: 0, alpha_compression: 1, alpha_filtering: 1, alpha_quality: 100, lossless: 0, exact: 0, image_hint: 0, emulate_jpeg_size: 0, thread_level: 0, low_memory: 0, near_lossless: 100, use_delta_palette: 0, use_sharp_yuv: 0 });
+  if (!out) throw new Error('WebP encoder failed');
+  return new Blob([out], { type: 'image/webp' });
 }
 
 async function putCover(kind, slug, src) {
