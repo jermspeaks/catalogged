@@ -135,10 +135,14 @@ pub fn theme_picker() -> maud::Markup {
 /// Palette-coloured book icon; one SVG serves as favicon and manifest icon.
 pub const FAVICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#4c1036"/><rect x="16" y="12" width="32" height="40" rx="3" fill="#c6d8ff"/><rect x="16" y="12" width="8" height="40" rx="3" fill="#6b5ca5"/><rect x="29" y="22" width="14" height="3" fill="#72195a"/><rect x="29" y="30" width="10" height="3" fill="#71a9f7"/></svg>"##;
 
-pub const MANIFEST: &str = r##"{"name":"catalogged","short_name":"catalogged","start_url":"/","display":"standalone","background_color":"#f6f8ff","theme_color":"#4c1036","icons":[{"src":"/favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}"##;
+pub const APPLE_TOUCH_ICON: &[u8] = include_bytes!("icons/apple-touch-icon.png");
+pub const ICON_192: &[u8] = include_bytes!("icons/icon-192.png");
+pub const ICON_512: &[u8] = include_bytes!("icons/icon-512.png");
+
+pub const MANIFEST: &str = r##"{"name":"catalogged","short_name":"catalogged","start_url":"/","display":"standalone","background_color":"#f6f8ff","theme_color":"#4c1036","icons":[{"src":"/favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"},{"src":"/icon-192.png","sizes":"192x192","type":"image/png"},{"src":"/icon-512.png","sizes":"512x512","type":"image/png"}]}"##;
 
 /// Head links for the favicon and web manifest (routes in lib.rs).
-pub const FAVICON_LINKS: &str = r##"<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#4c1036">"##;
+pub const FAVICON_LINKS: &str = r##"<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#4c1036">"##;
 
 /// The 1 to 10 rating as faces: 1 😖😖, 2 😖, 3 🙁🙁, 4 🙁, 5 😐, 6 🙂, 7 😄, 8 😄😄, 9 😍, 10 🤩.
 /// Mirrors `emoji` in the grid script.

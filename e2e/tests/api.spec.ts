@@ -63,6 +63,11 @@ test('public caching headers are set', async ({ request }) => {
   expect((await request.get('/index.json')).headers()['cache-control']).toContain('max-age=900');
   expect((await request.get('/favicon.svg')).status()).toBe(200);
   expect((await request.get('/manifest.webmanifest')).status()).toBe(200);
+  for (const p of ['/apple-touch-icon.png', '/icon-192.png', '/icon-512.png']) {
+    const r = await request.get(p);
+    expect(r.status(), p).toBe(200);
+    expect(r.headers()['content-type'], p).toBe('image/png');
+  }
 });
 
 test('provider id: set, keep through the edit form, validate and reject duplicates', async ({ request }) => {
