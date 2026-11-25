@@ -37,6 +37,28 @@ test('manual add with a cover, then it shows in the list and on the public grid'
   expect(await page.locator('#grid li img').evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(true);
 });
 
+test('cover upload still produces WebP when the browser cannot encode it (Safari, iOS)', async ({ page, request }) => {
+  // Safari's canvas.toBlob ignores 'image/webp' and returns a PNG; do the same here.
+  await page.addInitScript(() => {
+    const orig = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (cb: BlobCallback, type?: string, q?: any) { return orig.call(this, cb, 'image/png', q); };
+  });
+  const wasm = page.waitForResponse((r) => r.url().endsWith('/admin/assets/webp_enc.wasm') && r.ok());
+  await page.goto('/admin');
+  await page.locator('summary', { hasText: 'Add manually' }).click();
+  const form = page.locator('#manual');
+  await form.locator('select[name=kind]').selectOption('book');
+  await form.locator('input[name=title]').fill('E2E Safari Book');
+  await form.locator('input[name=cover]').setInputFiles(upload('s.png'));
+  await form.getByRole('button', { name: 'Add' }).click();
+  await expect(page.locator('#msg')).toContainText('Added "E2E Safari Book"');
+  await wasm; // the fallback encoder was really used
+  const { body } = await entry(request, 'book', 'e2e-safari-book');
+  const cover = await request.get(`/covers/${body.cover_key}`);
+  expect(cover.status()).toBe(200);
+  expect((await cover.body()).subarray(8, 12).toString()).toBe('WEBP');
+});
+
 test('edit page: save fields, replace the cover, then delete through the dialog', async ({ page, request }) => {
   const slug = await seed(request, { kind: 'movie', title: 'E2E Edit Me', status: 'wanted' });
   await page.goto(`/admin/edit/movie/${slug}`);

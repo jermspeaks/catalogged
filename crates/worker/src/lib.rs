@@ -66,6 +66,8 @@ fn router(env: Env) -> Router {
         .route("/admin", get(admin_page))
         .route("/admin/", get(admin_page))
         .route("/admin/edit/{kind}/{slug}", get(admin_edit_page))
+        .route("/admin/assets/webp_enc.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript"), (header::CACHE_CONTROL, "private, max-age=604800")], include_bytes!("vendor/webp_enc.js").as_slice()) }))
+        .route("/admin/assets/webp_enc.wasm", get(|| async { ([(header::CONTENT_TYPE, "application/wasm"), (header::CACHE_CONTROL, "private, max-age=604800")], include_bytes!("vendor/webp_enc.wasm").as_slice()) }))
         .route("/admin/api/search", get(search))
         .route("/admin/api/lookup", get(lookup))
         .route("/admin/api/owned", get(owned))

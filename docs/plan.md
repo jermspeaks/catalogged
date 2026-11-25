@@ -40,7 +40,6 @@ Per-kind and per-status counts; richer detail pages (year, source link, provider
 
 ### P6. Housekeeping
 - Open Library edition ids (`OL…M`): design agreed, to build in its own session. (1) Reject `OL…M` in `EditEntry::validate_for` with a message pointing at the work id (`OL…W`). (2) Resolve an edition to its work automatically (`/books/OL…M.json` has a `works` link) when an id is typed or pasted, in the admin id fields and in the CLI. (3) For books Open Library lacks, keep Add manually and add an optional source link (`source_url`) on the entry, which also serves the "publisher site" idea in discovery.md. Fix the four existing edition-id books on their edit pages once (2) exists.
-- Mobile cover upload: canvas `toBlob('image/webp')` is not supported in Safari/iOS (it returns a PNG), so `toWebp` in `crates/worker/src/admin_ui.rs` throws. Options: ship a small WebP encoder (WASM) with the admin page, or accept JPEG covers from the browser and store/serve them with their own content type (the Worker never encodes). Confirm the failing browser first.
 - Steam import (discovery.md): `seeds/steam.txt` is a paste of the purchase history (date, item, acquisition method). No Steam ids or playtime. Needs decisions on status and date before building `scripts/steam2csv.py`.
 - GitHub Action running the e2e suite on pull requests (on hold; run `npm test` in `e2e/` before merging Worker or UI changes today).
 - Admin game search in production needs the two IGDB Worker secrets: set (owner, 2026-11-24).
