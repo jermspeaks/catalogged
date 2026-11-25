@@ -32,32 +32,19 @@ What is built lives in [completed.md](completed.md). This file is what remains, 
 
 Ordered by value for the owner's actual goal (a complete, good-looking catalogue) against effort. Sizes: S under half a day, M about a day, L more. Reorder freely.
 
-### P1. Import the log: done; loose ends remain (S)
-All of the owner's log (2010 to 2026) is imported: 1,876 entries on 2026-11-23 (1,449 movies, 396 books, 26 shows, 5 games). The generator and procedure are in [completed.md](completed.md); `scripts/log2csv.py` and the per-year steps (generate, `match -i`, `import --dry-run`, `scripts/backup.sh`, a 10-row trial, then the rest with `--skip-existing`) stay valid for new log files.
-- Lessons: the log marks TV with 🎥 (Letterboxd), so shows land as movies and `match` skips them; spot them before matching (a title TMDB finds only as TV) and set `kind` to `show`. Open Library returns 503s now and then: re-run `import --skip-existing`. A wrong hand-pick imports quietly, so check the 10-row trial; the sheet's `creator` is copied onto the entry.
-- Loose ends (use `/admin?missing=id|cover|any`, Identify on the edit page, or `catalogged identify`): books and a few films with no provider id or cover (the log has no author for 2018's books); four books with Open Library edition ids (`OL…M`); entries with an id but no year or creator; shows watched as 🎥 in 2010 to 2020 that were imported as movies. The owner's dev journal (`~/Documents/dev-journal/Atlas/Sources/Books/`, `isbn13` in the YAML) resolves most id-less books through Open Library's ISBN search; it also has a `rating` field. 🎵 concerts and 🎤 musicals in the log are not imported.
-
-### P2. Measure at scale: done (2026-11-23, 1,949 entries); re-check near 5,000
-`/index.json` is 326 KB raw and 94 KB brotli on the wire (about 167 bytes per entry, so about 840 KB raw and 240 KB compressed at 5,000). Rebuilding it is one D1 query: 1,949 rows read, 31 ms in D1; the whole request took 0.17 s from the owner's machine. At most one rebuild per edge location per 15 minutes (plus one after each admin write): about 190k rows a day per busy location now, about 480k at 5,000 entries, against 5M a day, so roughly ten locations could rebuild all day and stay under. The Worker only wraps the string SQLite builds, so CPU should be a few ms; not measured directly (check "CPU time p99" in the dashboard after a few days of traffic). No change needed; if it ever is, trim fields, page it or add FTS5. Public list pages still read about 60 rows each.
-
-### P4. Public site (M, as wanted)
-
-### P3. Warn before adding a duplicate (S)
-The database already rejects duplicates (409). In the admin search results, mark titles already in the catalogue ("in catalogue", linking to its edit page) and disable Add, instead of failing after the click. Needs the existing list (`/index.json`) loaded on the admin page.
-
-### P4. Track TV shows by season (M)
+### P4. Track TV shows by season (M, on hold)
 From the owner's discovery notes (2026-11-23): a series can be watched over years, so a show should record each season with its own date. Today a show is one entry with one `consumed_at`, and the log's season text sits in `review` ("Season 4"). Needs a design first: probably a small `seasons` table (entry id, season label, date) or a JSON column on the entry, shown on the detail page, with the entry's own date following the latest season; a migration, the admin edit form and `/index.json` (keep it small) are affected. Also settle how `import` treats a repeated show (today `--skip-existing` drops the later season). Ask the owner before building.
 
-### P5. Public site (M, as wanted)
+### P5. Public site (M, on hold)
 Per-kind and per-status counts; richer detail pages (year, source link, provider overview); lazy cover sizing; show the creator on grid cards. Optional until the catalogue is populated, since the grid is the main surface.
 
-### P6. Housekeeping (S each)
-- GitHub Action running the e2e suite on pull requests (none exists; run `npm test` in `e2e/` before merging Worker or UI changes today).
-- PNG and apple-touch icons (the favicon and manifest use an SVG only).
-- Validate provider ids on write: an Open Library id must look like `OL…W` (a work). Edition ids (`OL…M`) were saved by hand for four books and no lookup accepts them; fix those entries on their edit pages, and reject the pattern in `EditEntry::validate_for`.
-- The CLI cannot decode WebP posters (TMDB serves a few): the entry is added with its id but no cover (*8½*, *Alps*, *Head*, *I Knew Her Well*, *The Man From U.N.C.L.E.*). Decode WebP, or ask TMDB for a JPEG size.
-- Admin game search in production needs the two IGDB Worker secrets (`wrangler secret put IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET`); owner action, only if game search in `/admin` is wanted.
-- Review real free-tier numbers after a few weeks of traffic.
+### P6. Housekeeping
+- Open Library edition ids (`OL…M`): design agreed, to build in its own session. (1) Reject `OL…M` in `EditEntry::validate_for` with a message pointing at the work id (`OL…W`). (2) Resolve an edition to its work automatically (`/books/OL…M.json` has a `works` link) when an id is typed or pasted, in the admin id fields and in the CLI. (3) For books Open Library lacks, keep Add manually and add an optional source link (`source_url`) on the entry, which also serves the "publisher site" idea in discovery.md. Fix the four existing edition-id books on their edit pages once (2) exists.
+- Mobile cover upload: canvas `toBlob('image/webp')` is not supported in Safari/iOS (it returns a PNG), so `toWebp` in `crates/worker/src/admin_ui.rs` throws. Options: ship a small WebP encoder (WASM) with the admin page, or accept JPEG covers from the browser and store/serve them with their own content type (the Worker never encodes). Confirm the failing browser first.
+- Steam import (discovery.md): `seeds/steam.txt` is a paste of the purchase history (date, item, acquisition method). No Steam ids or playtime. Needs decisions on status and date before building `scripts/steam2csv.py`.
+- GitHub Action running the e2e suite on pull requests (on hold; run `npm test` in `e2e/` before merging Worker or UI changes today).
+- Admin game search in production needs the two IGDB Worker secrets: set (owner, 2026-11-24).
+- Review real free-tier numbers after a few weeks of traffic (on hold).
 
 ## Known limits (accepted)
 

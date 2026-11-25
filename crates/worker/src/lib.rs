@@ -43,6 +43,10 @@ fn cover_src(env: &Env, key: &str) -> String {
     }
 }
 
+fn png_response(bytes: &'static [u8]) -> ([(header::HeaderName, &'static str); 2], &'static [u8]) {
+    ([(header::CONTENT_TYPE, "image/png"), (header::CACHE_CONTROL, "public, max-age=86400")], bytes)
+}
+
 fn router(env: Env) -> Router {
     Router::new()
         .route("/", get(home))
@@ -50,6 +54,9 @@ fn router(env: Env) -> Router {
         .route("/wanted", get(wanted_page))
         .route("/index.json", get(index_json))
         .route("/favicon.svg", get(|| async { ([(header::CONTENT_TYPE, "image/svg+xml"), (header::CACHE_CONTROL, "public, max-age=86400")], public_ui::FAVICON_SVG) }))
+        .route("/apple-touch-icon.png", get(|| async { png_response(public_ui::APPLE_TOUCH_ICON) }))
+        .route("/icon-192.png", get(|| async { png_response(public_ui::ICON_192) }))
+        .route("/icon-512.png", get(|| async { png_response(public_ui::ICON_512) }))
         .route("/manifest.webmanifest", get(|| async { ([(header::CONTENT_TYPE, "application/manifest+json"), (header::CACHE_CONTROL, "public, max-age=86400")], public_ui::MANIFEST) }))
         .route("/entry/{kind}/{slug}", get(entry_page))
         .route("/covers/{kind}/{file}", get(serve_cover))

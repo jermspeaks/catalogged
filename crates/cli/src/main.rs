@@ -422,16 +422,22 @@ impl Meta {
     /// Downloads the cover and re-encodes it as a WebP under the free-tier size cap.
     fn cover_webp(&self, url: &str) -> Result<Vec<u8>> {
         let bytes = self.http.get(url).send()?.error_for_status()?.bytes()?;
-        let img = image::load_from_memory(&bytes).context("decoding cover")?;
-        let enc = webp::Encoder::from_image(&img).map_err(|e| anyhow::anyhow!("webp: {e}"))?;
-        for quality in [82.0, 70.0, 55.0, 40.0] {
-            let out = enc.encode(quality).to_vec();
-            if out.len() <= MAX_COVER_BYTES {
-                return Ok(out);
-            }
-        }
-        bail!("could not encode a WebP under {MAX_COVER_BYTES} bytes")
+        encode_cover(&bytes)
     }
+}
+
+/// Decodes a downloaded cover (JPEG, PNG or WebP; TMDB serves a few posters as WebP) and
+/// re-encodes it as a WebP under the size cap.
+fn encode_cover(bytes: &[u8]) -> Result<Vec<u8>> {
+    let img = image::load_from_memory(bytes).context("decoding cover")?;
+    let enc = webp::Encoder::from_image(&img).map_err(|e| anyhow::anyhow!("webp: {e}"))?;
+    for quality in [82.0, 70.0, 55.0, 40.0] {
+        let out = enc.encode(quality).to_vec();
+        if out.len() <= MAX_COVER_BYTES {
+            return Ok(out);
+        }
+    }
+    bail!("could not encode a WebP under {MAX_COVER_BYTES} bytes")
 }
 
 /// Fill in blanks from the provider and return the cover URL (if any) for the cover step.
@@ -1135,6 +1141,14 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn covers_in_webp_can_be_decoded() {
+        let rgb = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(40, 60, image::Rgb([200, 30, 90])));
+        let source = webp::Encoder::from_image(&rgb).unwrap().encode(80.0).to_vec();
+        let out = encode_cover(&source).expect("a WebP source should decode and re-encode");
+        assert_eq!(image::load_from_memory(&out).unwrap().width(), 40);
+    }
 
     fn entry() -> Entry {
         serde_json::from_value(serde_json::json!({
